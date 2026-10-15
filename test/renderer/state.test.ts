@@ -92,6 +92,26 @@ describe('renames and deletes', () => {
   })
 })
 
+describe('stale renders', () => {
+  it('editing variables during an environment rename keeps the new title', () => {
+    let s = reducer(withTabs(), { type: 'open', id: 'env:environments/A.env.json', doc: { kind: 'variables', title: 'A', rows: [] } })
+    const key = s.tabs[0].key
+    s = reducer(s, { type: 'renamed', id: 'env:environments/A.env.json', newId: 'env:environments/Dev.env.json', name: 'Dev' })
+    s = reducer(s, { type: 'setRows', key, rows: [{ key: 'x', type: 'default', initial: '1', current: '1', enabled: true }] })
+    expect(s.tabs[0].doc).toMatchObject({ title: 'Dev', rows: [{ key: 'x' }] })
+    expect(s.tabs[0].id).toBe('env:environments/Dev.env.json')
+  })
+
+  it('editing collection settings during a rename keeps the new name', () => {
+    let s = reducer(withTabs(), { type: 'open', id: 'collections/C', doc: { kind: 'container', container: { name: 'C' }, variables: [] } })
+    const key = s.tabs[0].key
+    s = reducer(s, { type: 'renamed', id: 'collections/C', newId: 'collections/D', name: 'D' })
+    s = reducer(s, { type: 'patchContainer', key, patch: { description: 'docs' } })
+    s = reducer(s, { type: 'setContainerVariables', key, variables: [] })
+    expect(s.tabs[0].doc).toMatchObject({ container: { name: 'D', description: 'docs' } })
+  })
+})
+
 describe('sending', () => {
   it('ignores results from a superseded send', () => {
     let s = withTabs('a')

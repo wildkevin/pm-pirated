@@ -1,0 +1,163 @@
+import { ChevronDown, Save } from 'lucide-react'
+import { useState } from 'react'
+import type { PmAuth, PmItem, PmRequest } from '../../../shared/format/types'
+import { pathVariables, queryParams, rawUrl, setPathVariables, setQueryParams, setRaw } from '../../../shared/format/url'
+import type { AppSettingsData } from '../../../shared/settings'
+import { METHODS, methodClass } from '../../lib/methods'
+import type { Tab } from '../../state'
+import { KeyValueTable, Menu } from '../common/ui'
+import { VarInput, type Resolve } from '../common/VarInput'
+import { AuthEditor } from './AuthEditor'
+import { BodyEditor } from './BodyEditor'
+import { RequestSettings } from './RequestSettings'
+import { ScriptEditor, scriptOf } from './ScriptEditor'
+
+type Section = 'params' | 'auth' | 'headers' | 'body' | 'prerequest' | 'test' | 'settings'
+
+export interface RequestEditorProps {
+  tab: Tab
+  item: PmItem
+  breadcrumb: string[]
+  resolve: Resolve
+  settings: AppSettingsData | null
+  onPatch(patch: Partial<PmRequest>): void
+  onItemPatch(patch: Partial<Omit<PmItem, 'request' | 'name'>>): void
+  onSend(download?: boolean): void
+  onCancel(): void
+  onSave(): void
+  onPasteCurl(text: string): void
+  onOpenCookies(): void
+  pickFile(): Promise<string | null>
+  onGetOAuth2Token(auth: PmAuth): Promise<void>
+}
+
+export function RequestEditor(p: RequestEditorProps) {
+  const [section, setSection] = useState<Section>('params')
+  const [sendMenu, setSendMenu] = useState<DOMRect | null>(null)
+  const { item } = p
+  const req = item.request
+  const raw = rawUrl(req.url)
+  const sending = !!p.tab.sendId
+  const params = queryParams(req.url)
+  const pathVars = pathVariables(req.url)
+  const activeHeaders = req.header.filter((h) => !h.disabled && h.key).length
+  const activeParams = params.filter((x) => !x.disabled && x.key).length
+  const hasBody = !!req.body && !(req.body as { disabled?: boolean }).disabled
+  const hasPre = !!scriptOf(item.event, 'prerequest').trim()
+  const hasTest = !!scriptOf(item.event, 'test').trim()
+
+  const tabs: { id: Section; label: string; badge?: number; dot?: boolean }[] = [
+    { id: 'params', label: 'Params', badge: activeParams },
+    { id: 'auth', label: 'Authorization', dot: !!req.auth && req.auth.type !== 'noauth' },
+    { id: 'headers', label: 'Headers', badge: activeHeaders },
+    { id: 'body', label: 'Body', dot: hasBody },
+    { id: 'prerequest', label: 'Pre-request Script', dot: hasPre },
+    { id: 'test', label: 'Tests', dot: hasTest },
+    { id: 'settings', label: 'Settings', dot: !!item.protocolProfileBehavior },
+  ]
+
+  return (
+    <div className="editor">
+      <div className="editor-title">
+        <span className="editor-breadcrumb">
+          <span className="http-badge">HTTP</span>
+          {p.breadcrumb.map((b, i) => (
+            <span key={i} className="crumb">
+              {b} <span className="crumb-sep">/</span>
+            </span>
+          ))}
+          <span className="editor-name">{item.name}</span>
+        </span>
+        <button className="btn btn-ghost" onClick={p.onSave} title="Save (Ctrl+S)">
+          <Save size={14} /> Save
+        </button>
+      </div>
+
+      <div className="url-row">
+        <div className="url-group">
+          <select aria-label="HTTP method" className={`method method-select ${methodClass(req.method)}`} value={req.method} onChange={(e) => p.onPatch({ method: e.target.value })}>
+            {(METHODS as readonly string[]).concat(METHODS.includes(req.method as never) ? [] : [req.method]).map((m) => (
+              <option key={m}>{m}</option>
+            ))}
+          </select>
+          <VarInput
+            ariaLabel="Request URL"
+            placeholder="Enter URL or paste text"
+            value={raw}
+            resolve={p.resolve}
+            onChange={(text) => p.onPatch({ url: setRaw(req.url, text) })}
+            onEnter={() => !sending && raw.trim() && p.onSend()}
+            onPasteCurl={p.onPasteCurl}
+          />
+        </div>
+        {sending ? (
+          <button className="btn btn-send" onClick={p.onCancel}>
+            Cancel
+          </button>
+        ) : (
+          <div className="send-group">
+            <button className="btn btn-send send-main" onClick={() => p.onSend()} disabled={!raw.trim()} title="Send (Ctrl+Enter)">
+              Send
+            </button>
+            <button className="btn btn-send send-more" aria-label="Send options" disabled={!raw.trim()} onClick={(e) => setSendMenu(e.currentTarget.getBoundingClientRect())}>
+              <ChevronDown size={14} />
+            </button>
+            {sendMenu && (
+              <Menu
+                style={{ left: sendMenu.right - 160, top: sendMenu.bottom + 4 }}
+                onClose={() => setSendMenu(null)}
+                items={[{ label: 'Send and Download', onClick: () => p.onSend(true) }]}
+              />
+            )}
+          </div>
+        )}
+      </div>
+
+      <div className="subtabs" role="tablist">
+        {tabs.map((t) => (
+          <button key={t.id} role="tab" aria-selected={section === t.id} onClick={() => setSection(t.id)}>
+            {t.label}
+            {!!t.badge && <span className="count">({t.badge})</span>}
+            {t.dot && <span className="dot-indicator" />}
+          </button>
+        ))}
+        <span className="spacer" />
+        <button className="link-btn cookies-link" onClick={p.onOpenCookies}>
+          Cookies
+        </button>
+      </div>
+
+      <div className="subtab-panel">
+        {section === 'params' && (
+          <>
+            <div className="section-title">Query Params</div>
+            <KeyValueTable rows={params} onChange={(rows) => p.onPatch({ url: setQueryParams(req.url, rows) })} />
+            {pathVars.length > 0 && (
+              <>
+                <div className="section-title">Path Variables</div>
+                <KeyValueTable rows={pathVars} readOnlyKeys noBulk noToggle onChange={(rows) => p.onPatch({ url: setPathVariables(req.url, rows) })} />
+              </>
+            )}
+          </>
+        )}
+        {section === 'auth' && (
+          <AuthEditor
+            auth={req.auth}
+            canInherit
+            inheritedFrom={p.breadcrumb.length ? p.breadcrumb.join(' / ') : undefined}
+            onChange={(auth) => p.onPatch({ auth })}
+            onGetOAuth2Token={p.onGetOAuth2Token}
+          />
+        )}
+        {section === 'headers' && <KeyValueTable rows={req.header} onChange={(header) => p.onPatch({ header })} />}
+        {section === 'body' && <BodyEditor body={req.body} onChange={(body) => p.onPatch({ body })} pickFile={p.pickFile} />}
+        {(section === 'prerequest' || section === 'test') && (
+          <ScriptEditor key={section} events={item.event} listen={section} onChange={(event) => p.onItemPatch({ event })} />
+        )}
+        {section === 'settings' && (
+          <RequestSettings behavior={item.protocolProfileBehavior} settings={p.settings} onChange={(protocolProfileBehavior) => p.onItemPatch({ protocolProfileBehavior })} />
+        )}
+      </div>
+    </div>
+  )
+}

@@ -55,6 +55,11 @@ export type Action =
   /** A patch, not a full item: a stale render must not overwrite fields changed meanwhile (e.g. the name). */
   | { type: 'edit'; key: string; patch: Partial<PmRequest> }
   | { type: 'editItem'; key: string; patch: Partial<Omit<PmItem, 'request' | 'name'>> }
+  // Patches for collection/folder and variables tabs (never whole docs from a possibly stale render).
+  | { type: 'patchContainer'; key: string; patch: Partial<PmContainer> }
+  | { type: 'setContainerVariables'; key: string; variables: VariableRow[] }
+  | { type: 'setRows'; key: string; rows: VariableRow[] }
+  /** Replace a doc with freshly loaded data (not for user edits). */
   | { type: 'setDoc'; key: string; doc: TabDoc }
   /** After saving; `id` is set when a draft was saved into a collection. */
   | { type: 'saved'; key: string; doc: TabDoc; id?: string }
@@ -155,6 +160,19 @@ export function reducer(s: State, a: Action): State {
           return { ...t, doc: { ...doc, item: { ...doc.item, ...a.patch } } }
         },
       )
+    case 'patchContainer':
+      return mapTab(
+        s,
+        (t) => t.key === a.key && t.doc.kind === 'container',
+        (t) => {
+          const doc = t.doc as Extract<TabDoc, { kind: 'container' }>
+          return { ...t, doc: { ...doc, container: { ...doc.container, ...a.patch } } }
+        },
+      )
+    case 'setContainerVariables':
+      return mapTab(s, (t) => t.key === a.key && t.doc.kind === 'container', (t) => ({ ...t, doc: { ...(t.doc as Extract<TabDoc, { kind: 'container' }>), variables: a.variables } }))
+    case 'setRows':
+      return mapTab(s, (t) => t.key === a.key && t.doc.kind === 'variables', (t) => ({ ...t, doc: { ...(t.doc as Extract<TabDoc, { kind: 'variables' }>), rows: a.rows } }))
     case 'setDoc':
       return mapTab(s, (t) => t.key === a.key, (t) => ({ ...t, doc: a.doc }))
     case 'saved':

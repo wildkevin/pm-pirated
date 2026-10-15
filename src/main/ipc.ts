@@ -1,4 +1,4 @@
-import { dialog, ipcMain, type BrowserWindow } from 'electron'
+import { BrowserWindow, dialog, ipcMain, net } from 'electron'
 import { randomUUID } from 'node:crypto'
 import { readFile, writeFile } from 'node:fs/promises'
 import { isAbsolute, join, relative } from 'node:path'
@@ -9,6 +9,7 @@ import { rawUrl } from '../shared/format/url'
 import { CHANNELS, type Api, type ImportResult, type ResolvedVariable } from '../shared/ipc'
 import type { EngineClient } from './engineClient'
 import { ARGS } from './ipcSchemas'
+import { getToken, parseCallback } from './oauth2'
 import { engineOptions } from './netconfig'
 import type { SecretStore } from './secrets'
 import type { AppSettings } from './settings'
@@ -198,8 +199,23 @@ export function registerIpc(deps: IpcDeps): void {
 
     getSettings: async () => deps.settings.get(),
     async saveSettings(s) {
+      const certsChanged = JSON.stringify(deps.settings.get().certificates) !== JSON.stringify(s.certificates)
       await deps.settings.save(s)
-      caFile = deps.caBundle().catch(() => undefined)
+      if (certsChanged) caFile = deps.caBundle().catch(() => undefined)
+    },
+    getOAuth2Token: (config) =>
+      getToken(config, {
+        authorize: (url, redirectUri) => authorizeInWindow(deps.win, url, redirectUri),
+        async fetch(url, init) {
+          const res = await net.fetch(url, init)
+          return { ok: res.ok, status: res.status, text: () => res.text(), contentType: res.headers.get('content-type') ?? '' }
+        },
+      }),
+    async saveResponseBody(defaultName, body) {
+      const res = await dialog.showSaveDialog(deps.win, { title: 'Save response', defaultPath: sanitizeName(defaultName) })
+      if (res.canceled || !res.filePath) return false
+      await writeFile(res.filePath, body)
+      return true
     },
     async pickFile(title) {
       const res = await dialog.showOpenDialog(deps.win, { title, properties: ['openFile'] })
@@ -225,4 +241,39 @@ async function saveJson(win: BrowserWindow, defaultName: string, doc: unknown): 
   if (res.canceled || !res.filePath) return false
   await writeFile(res.filePath, stableStringify(doc))
   return true
+}
+
+/**
+ * Shows the provider's login page in an isolated window (own session, no preload, sandboxed) and
+ * resolves with the callback URL as soon as the browser is sent there — it is never actually loaded.
+ */
+function authorizeInWindow(parent: BrowserWindow, authUrl: string, redirectUri: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const win = new BrowserWindow({
+      parent,
+      modal: true,
+      width: 520,
+      height: 720,
+      title: 'Get New Access Token',
+      autoHideMenuBar: true,
+      webPreferences: { partition: 'oauth2', sandbox: true, contextIsolation: true, nodeIntegration: false },
+    })
+    let done = false
+    const finish = (fn: () => void) => {
+      if (done) return
+      done = true
+      fn()
+      if (!win.isDestroyed()) win.close()
+    }
+    const check = (e: { preventDefault(): void }, url: string) => {
+      if (!parseCallback(url, redirectUri)) return
+      e.preventDefault()
+      finish(() => resolve(url))
+    }
+    win.webContents.on('will-redirect', check)
+    win.webContents.on('will-navigate', check)
+    win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+    win.on('closed', () => finish(() => reject(new Error('Authentication window was closed'))))
+    win.loadURL(authUrl).catch(() => undefined)
+  })
 }

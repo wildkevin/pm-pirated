@@ -1,7 +1,7 @@
-import type { Api } from '../shared/ipc'
+import type { Api, AppEvents } from '../shared/ipc'
 
 declare global {
   interface Window {
-    api: Api
+    api: Api & AppEvents
   }
 }

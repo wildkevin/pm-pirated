@@ -1,4 +1,5 @@
-import { BrowserWindow, type BrowserWindowConstructorOptions } from 'electron'
+import { BrowserWindow, ipcMain, type BrowserWindowConstructorOptions } from 'electron'
+import { BEFORE_CLOSE, CLOSE_READY } from '../shared/ipc'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
@@ -55,6 +56,19 @@ export function createMainWindow(): BrowserWindow {
     if (!isTrustedUrl(url, loc)) e.preventDefault()
   })
   win.once('ready-to-show', () => win.show())
+  // Let the renderer save open tabs (unsaved edits included) before the window goes away.
+  let closing = false
+  const reallyClose = () => {
+    closing = true
+    if (!win.isDestroyed()) win.close()
+  }
+  win.on('close', (e) => {
+    if (closing) return
+    e.preventDefault()
+    ipcMain.once(CLOSE_READY, (ev) => ev.sender === win.webContents && reallyClose())
+    setTimeout(reallyClose, 1000)
+    win.webContents.send(BEFORE_CLOSE)
+  })
   if (loc.devUrl) void win.loadURL(loc.devUrl)
   else void win.loadFile(loc.file)
   return win

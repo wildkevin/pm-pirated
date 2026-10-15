@@ -97,4 +97,6 @@ export const ARGS = {
   getSettings: z.tuple([]),
   saveSettings: z.tuple([settings]),
   pickFile: z.tuple([z.string().max(200)]),
+  saveResponseBody: z.tuple([z.string().max(255), z.instanceof(Uint8Array)]),
+  getOAuth2Token: z.tuple([z.record(z.string(), z.string().max(10_000))]),
 } satisfies Record<keyof Api, z.ZodType>

@@ -27,6 +27,30 @@ export interface ResolvedVariable {
   secret: boolean
 }
 
+/** OAuth 2.0 "Configure New Token" values, with variables already resolved. */
+export interface OAuth2Config {
+  grant_type?: string
+  authUrl?: string
+  accessTokenUrl?: string
+  clientId?: string
+  clientSecret?: string
+  scope?: string
+  state?: string
+  redirect_uri?: string
+  client_authentication?: string
+  username?: string
+  password?: string
+  challengeAlgorithm?: string
+}
+
+export interface OAuth2Token {
+  access_token: string
+  token_type?: string
+  refresh_token?: string
+  expires_in?: number
+  scope?: string
+}
+
 export interface ImportResult {
   kind: 'collection' | 'environment' | 'globals' | 'request'
   id: string
@@ -119,9 +143,21 @@ export interface Api {
   // app
   getSettings(): Promise<AppSettingsData>
   saveSettings(settings: AppSettingsData): Promise<void>
+  /** Runs the OAuth 2.0 flow (login window for code/implicit grants) and returns the token. */
+  getOAuth2Token(config: OAuth2Config): Promise<OAuth2Token>
+  /** Save dialog for a response body; false when cancelled. */
+  saveResponseBody(defaultName: string, body: Uint8Array): Promise<boolean>
   /** File picker for bodies/certificates; paths inside the workspace come back relative. */
   pickFile(title: string): Promise<string | null>
 }
+
+/** Not request/response calls: the close handshake that lets the UI save unsaved tab state. */
+export interface AppEvents {
+  onBeforeClose(cb: () => void): void
+  closeReady(): void
+}
+export const BEFORE_CLOSE = 'app:before-close'
+export const CLOSE_READY = 'app:close-ready'
 
 export const CHANNELS = {
   openWorkspaceDialog: 'workspace:openDialog',
@@ -158,4 +194,6 @@ export const CHANNELS = {
   getSettings: 'settings:get',
   saveSettings: 'settings:save',
   pickFile: 'dialog:pickFile',
+  saveResponseBody: 'dialog:saveResponse',
+  getOAuth2Token: 'oauth2:getToken',
 } as const satisfies Record<keyof Api, string>
