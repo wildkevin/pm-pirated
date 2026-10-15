@@ -1,3 +1,4 @@
+import { useSettings } from '../../settings'
 import { useState } from 'react'
 import { cleanError } from '../../lib/body'
 import type { BodyMode, PmBody, PmFormParam, PmKeyValue, RawLanguage } from '../../../shared/format/types'
@@ -49,15 +50,15 @@ function switchMode(body: PmBody | undefined, mode: BodyMode): PmBody {
   }
 }
 
-function beautify(text: string, language: RawLanguage): string {
-  if (language === 'json') return JSON.stringify(JSON.parse(text), null, 4)
+function beautify(text: string, language: RawLanguage, indent: string): string {
+  if (language === 'json') return JSON.stringify(JSON.parse(text), null, indent)
   if (language === 'xml' || language === 'html') {
     if (language === 'xml' && new DOMParser().parseFromString(text, 'application/xml').querySelector('parsererror')) throw new Error('Invalid XML. Correct the markup before formatting.')
     let depth = 0
     return text.replace(/>\s*</g, '>\n<').split('\n').map(line => {
       const value = line.trim()
       if (/^<\//.test(value)) depth = Math.max(0, depth - 1)
-      const formatted = '    '.repeat(depth) + value
+      const formatted = indent.repeat(depth) + value
       if (/^<[^!?/][^>]*>/.test(value) && !/\/>$/.test(value) && !/<\//.test(value) && !/^<(?:area|base|br|col|embed|hr|img|input|link|meta|param|source|track|wbr)\b/i.test(value)) depth++
       return formatted
     }).join('\n')
@@ -73,6 +74,8 @@ interface Props {
 }
 
 export function BodyEditor({ body, onChange, pickFile, allowFilesOutsideWorkingDir = false }: Props) {
+  const settings = useSettings()
+  const indent = settings.editor.indentType === 'tab' ? '\t' : ' '.repeat(settings.editor.indentCount)
   const [error, setError] = useState('')
   let graphqlError = ''
   if (body?.mode === 'graphql' && body.graphql.variables?.trim() && !body.graphql.variables.includes('{{')) {
@@ -121,7 +124,7 @@ export function BodyEditor({ body, onChange, pickFile, allowFilesOutsideWorkingD
               ))}
             </select>
             <span className="spacer" />
-            <button className="link-btn" onClick={() => { try { onChange({ ...body, raw: beautify(body.raw, language) }); setError('') } catch (e) { setError(`Could not format body: ${cleanError(e)}`) } }}>
+            <button className="link-btn" onClick={() => { try { onChange({ ...body, raw: beautify(body.raw, language, indent) }); setError('') } catch (e) { setError(`Could not format body: ${cleanError(e)}`) } }}>
               Beautify
             </button>
           </>
@@ -129,7 +132,7 @@ export function BodyEditor({ body, onChange, pickFile, allowFilesOutsideWorkingD
       </div>
 
       {(error || graphqlError) && <div role="alert" className="notice">{error || graphqlError}</div>}
-      {!allowFilesOutsideWorkingDir && (mode === 'file' || mode === 'formdata') && <div className="notice">Files must be inside the workspace folder. A blocked or missing file stops the request. To use other files, enable Settings &gt; General &gt; Allow reading files outside working directory.</div>}
+      {!allowFilesOutsideWorkingDir && (mode === 'file' || mode === 'formdata') && <div className="notice">Files must be inside the working directory configured in Settings. A blocked or missing file stops the request. To use other files, enable Settings &gt; General &gt; Allow reading files outside working directory.</div>}
       {mode === 'none' && <div className="muted-note">This request does not have a body</div>}
       {body && !disabled && body.mode === 'raw' && (
         <CodeEditor ariaLabel="Request body" language={language as EditorLanguage} value={body.raw} onChange={(raw) => onChange({ ...body, raw })} />

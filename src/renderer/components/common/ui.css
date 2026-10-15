@@ -1,13 +1,31 @@
 .menu .menu-item:focus-visible { outline: 2px solid var(--accent, #ff6c37); outline-offset: -2px; background: var(--bg-hover); }
-.modal.settings-modal { height: min(680px, 84vh); }
-.settings-modal > .modal-body { padding-top: 0; display: flex; flex-direction: column; overflow: hidden; min-height: 0; }
-.settings-modal .settings-tabs { flex: none; position: sticky; top: 0; padding-top: 8px; background: var(--bg-primary); }
-.settings-modal .settings-tabs button { border-radius: 0; border-bottom: 2px solid transparent; }
-.settings-modal .settings-tabs button[aria-selected="true"] { background: transparent; border-bottom-color: var(--accent, #ff6c37); }
-.settings-modal .settings-body { overflow: auto; min-height: 0; padding-right: 4px; padding-bottom: 16px; }
-.settings-modal .settings-general { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); column-gap: 36px; align-content: start; }
-.settings-modal .settings-general > .section-title { grid-column: 1 / -1; }
-.settings-modal .setting-row { min-width: 0; gap: 16px; }
+/* Postman 12 Settings: pinned left navigation and independently scrolling content. */
+.modal.settings-modal { width: min(1040px, 94vw); height: min(800px, 88vh); }
+.settings-modal > .modal-body { padding: 0; display: flex; flex-direction: column; overflow: hidden; min-height: 0; }
+.settings-layout { display: flex; flex: 1; min-height: 0; }
+.settings-tabs { display: flex; flex-direction: column; flex: 0 0 176px; padding: 16px 12px; gap: 4px; border-right: 1px solid var(--border); overflow: auto; }
+.settings-tabs button { border: 0; background: transparent; padding: 10px 16px; border-radius: 4px; text-align: left; cursor: pointer; }
+.settings-tabs button:hover { background: var(--bg-hover); }
+.settings-tabs button[aria-selected="true"] { background: var(--bg-selected); font-weight: 600; }
+.settings-body { flex: 1; min-width: 0; overflow: auto; padding: 24px 32px 40px; }
+.settings-page-title { margin: 0 0 24px; font-size: 22px; font-weight: 600; }
+.settings-modal .section-title { text-transform: none; font-size: 14px; color: var(--content-primary); margin: 28px 0 14px; }
+.settings-modal .setting-row { min-width: 0; gap: 24px; margin-bottom: 18px; align-items: center; }
+.settings-modal .setting-row > :first-child { min-width: 0; }
+.settings-modal .setting-row .muted { max-width: 430px; line-height: 1.6; margin-top: 6px; }
+.settings-modal .toggle-text { display: none; }
+.settings-modal .toggle.on .toggle-track { background: var(--send); }
+.settings-modal .select { max-width: 230px; }
+.settings-font { width: 300px; min-width: 0; }
+.settings-folder { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.settings-folder span { overflow-wrap: anywhere; }
+.theme-cards { display: flex; gap: 20px; flex-wrap: wrap; margin-top: 24px; }
+.theme-card { flex: 1 1 250px; min-width: 0; }
+.theme-preview { height: 165px; border: 1px solid; border-radius: 6px; overflow: hidden; margin-bottom: 18px; font-size: 10px; }
+.theme-preview > div { padding: 12px; border-bottom: 1px solid; }
+.theme-preview aside { float: left; width: 27%; padding: 12px 8px; height: 130px; }
+.theme-preview main { padding: 14px 8px; overflow: hidden; white-space: nowrap; }
+.settings-modal > .modal-body > .form-error { padding: 10px 24px; }
 .settings-section-heading { display: flex; align-items: center; justify-content: space-between; }
 .settings-section-heading .link-btn { font-size: var(--text-m); font-weight: 400; }
 .settings-modal .file-pick { min-width: 0; overflow-wrap: anywhere; }
@@ -16,4 +34,4 @@
 .cookie-chips .cookie-chip { padding: 0 4px 0 0; gap: 0; }
 .cookie-chip .cookie-edit { border: 0; background: transparent; color: inherit; cursor: pointer; min-width: 90px; padding: 8px 14px; text-align: left; border-radius: 12px; }
 .cookie-chip > .btn-icon { border-left: 1px solid var(--border-strong); border-radius: 0 12px 12px 0; }
-@media (max-width: 720px) { .settings-modal .settings-general { display: flex; } }
+@media (max-width: 720px) { .settings-tabs { flex-basis: 120px; padding: 10px 6px; } .settings-body { padding: 18px 16px; } .settings-modal .setting-row { gap: 12px; } .settings-font { width: 180px; } }

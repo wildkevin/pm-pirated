@@ -1,3 +1,4 @@
+import { SettingsProvider, VariableNamesContext } from './settings'
 import { Allotment } from 'allotment'
 import { Cookie, Globe, PanelLeft, PanelRight, PlayCircle, Radio, Terminal } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
@@ -7,7 +8,7 @@ import { rawUrl } from '../shared/format/url'
 import type { CaptureState, HistoryEntry, ImportResult, OAuth2Config, ResolvedVariable, WorkspaceListItem } from '../shared/ipc'
 import type { CapturedExchange } from '../shared/engine'
 import type { MockInfo, MockLogEntry } from '../shared/mock'
-import type { AppSettingsData } from '../shared/settings'
+import { DEFAULT_SETTINGS, type AppSettingsData } from '../shared/settings'
 import { getAttr, setAttr } from './lib/auth'
 import { cleanError, viewBody } from './lib/body'
 import { splitVariables } from './lib/misc'
@@ -70,6 +71,9 @@ export function App() {
   const [renamingId, setRenamingId] = useState<string | null>(null)
   const [history, setHistory] = useState<HistoryEntry[]>([])
   const [settings, setSettings] = useState<AppSettingsData | null>(null)
+  const prefs = settings ?? DEFAULT_SETTINGS
+  const settingsRef = useRef(prefs)
+  settingsRef.current = prefs
   const [resolved, setResolved] = useState<ResolvedVariable[]>([])
   const [consoleOpen, setConsoleOpen] = useState(false)
   const [consoleEntries, setConsoleEntries] = useState<ConsoleEntry[]>([])
@@ -121,6 +125,9 @@ export function App() {
   const persistTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const switching = useRef(false)
   const flushWorkspace = async () => {
+    if (settingsRef.current.ui.autosave) {
+      for (const tab of stateRef.current.tabs) if (tab.id && tab.doc.kind === 'request' && isDirty(tab)) await save(tab)
+    }
     await chain.current
     await restoreTask.current
     if (persistTimer.current) clearTimeout(persistTimer.current)
@@ -267,16 +274,16 @@ export function App() {
   const openRequest = (id: string, preview = false) =>
     run(async () => {
       const open = stateRef.current.tabs.find((t) => t.id === id && t.doc.kind === 'request')
-      if (open) return dispatch({ type: 'open', id, doc: open.doc, preview })
-      dispatch({ type: 'open', id, doc: { kind: 'request', item: await window.api.readRequest(id) }, preview })
+      if (open) return dispatch({ type: 'open', id, doc: open.doc, preview: preview && !prefs.ui.alwaysNewTab })
+      dispatch({ type: 'open', id, doc: { kind: 'request', item: await window.api.readRequest(id) }, preview: preview && !prefs.ui.alwaysNewTab })
     })
   const openContainer = (id: string, preview = false) =>
     run(async () => {
       const open = stateRef.current.tabs.find((t) => t.id === id && t.doc.kind === 'container')
-      if (open) return dispatch({ type: 'open', id, doc: open.doc, preview })
+      if (open) return dispatch({ type: 'open', id, doc: open.doc, preview: preview && !prefs.ui.alwaysNewTab })
       const isCollection = id.split('/').length === 2
       const [container, variables] = await Promise.all([window.api.readContainer(id), isCollection ? window.api.readVariables(`col:${id}`) : Promise.resolve(null)])
-      dispatch({ type: 'open', id, doc: { kind: 'container', container, variables }, preview })
+      dispatch({ type: 'open', id, doc: { kind: 'container', container, variables }, preview: preview && !prefs.ui.alwaysNewTab })
     })
   const openVariables = (scope: string, title: string) =>
     run(async () => {
@@ -361,10 +368,14 @@ export function App() {
     if (tab.sendId) void window.api.cancelRequest(tab.sendId)
   }
 
-  const closeMany = (tabs: Tab[]) => {
-    if (tabs.some(isDirty)) { setClosing(tabs.map((t) => t.key)); return }
-    act({ type: 'closeMany', keys: tabs.map((t) => t.key) })
-  }
+  const closeMany = (tabs: Tab[]) => void run(async () => {
+    if (settingsRef.current.ui.autosave) {
+      for (const tab of tabs) if (tab.id && tab.doc.kind === 'request' && isDirty(tab) && !(await save(tab))) return
+    }
+    const current = tabs.map(t => stateRef.current.tabs.find(x => x.key === t.key)).filter((t): t is Tab => !!t)
+    if (prefs.ui.confirmClose && current.some(isDirty)) { setClosing(current.map(t => t.key)); return }
+    act({ type: 'closeMany', keys: current.map(t => t.key) })
+  })
   const close = (tab: Tab) => closeMany([tab])
   const saveAndClose = async (keys = closing) => {
     for (const key of keys) {
@@ -402,15 +413,31 @@ export function App() {
     })
   }
 
+  // Existing requests are saved after edits settle; unnamed drafts still use Save As.
+  useEffect(() => {
+    if (!prefs.ui.autosave || switching.current || !state.workspace || restoredRoot.current !== state.workspace.root) return
+    const timer = setTimeout(() => {
+      for (const tab of stateRef.current.tabs) if (tab.id && tab.doc.kind === 'request' && isDirty(tab)) void save(tab)
+    }, 700)
+    return () => clearTimeout(timer)
+  }, [state.tabs, state.workspace?.root, prefs.ui.autosave])
+
   // --- keyboard shortcuts (Postman's) ---
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && overlayPanel) { setOverlayPanel(null); return }
       if (e.key === 'Escape' && page && stateRef.current.workspace && !modal) { setPage(null); return }
+      if ((e.ctrlKey || e.metaKey) && e.key === ',') { e.preventDefault(); setModal({ kind: 'settings' }); return }
+      if (!prefs.ui.shortcuts) return
       if (!(e.ctrlKey || e.metaKey) || !stateRef.current.workspace || modal || closing.length) return
       const tab = activeTab(stateRef.current)
-      const k = e.key.toLowerCase()
-      if (k === 's' && tab) {
+      const k = e.altKey && /^Key[A-Z]$/.test(e.code) ? e.code.slice(3).toLowerCase() : e.key.toLowerCase()
+      if (e.altKey && (k === 'm' || k === 's')) {
+        e.preventDefault()
+        const key = k === 'm' ? 'middleWorkbench' : 'swapSidebars'
+        const next = { ...prefs, ui: { ...prefs.ui, [key]: !prefs.ui[key] } }
+        void window.api.saveSettings(next).then(() => setSettings(next))
+      } else if (k === 's' && tab) {
         e.preventDefault()
         void save(tab)
       } else if (k === 'enter' && tab && !tab.sendId) {
@@ -421,13 +448,22 @@ export function App() {
         newRequestTab()
       } else if (k === 'w' && tab) {
         e.preventDefault()
-        close(tab)
+        if (e.altKey) act({ type: 'closeMany', keys: [tab.key] }); else close(tab)
       } else if (e.key === '\\') {
         e.preventDefault()
         toggleSidebar()
       } else if (k === 'k') {
         e.preventDefault()
         setSearchOpen(true)
+      } else if (/^[1-9]$/.test(k)) {
+        const target = stateRef.current.tabs[k === '9' ? stateRef.current.tabs.length - 1 : Number(k) - 1]
+        if (target) { e.preventDefault(); act({ type: 'activate', key: target.key }) }
+      } else if (e.shiftKey && (e.code === 'BracketLeft' || e.code === 'BracketRight')) {
+        e.preventDefault()
+        const tabs = stateRef.current.tabs
+        const index = tabs.findIndex(t => t.key === stateRef.current.activeKey)
+        const target = tabs[(index + (e.code === 'BracketRight' ? 1 : tabs.length - 1)) % tabs.length]
+        if (target) act({ type: 'activate', key: target.key })
       } else if (e.key === '[' || e.key === ']') {
         e.preventDefault()
         navigate(e.key === '[' ? 'back' : 'forward')
@@ -666,7 +702,7 @@ export function App() {
       return (
         <div className="request-area">
         <div className="request-main">
-        <Allotment vertical defaultSizes={requestSplit.current} onDragEnd={(sizes) => { requestSplit.current = sizes }}>
+        <Allotment key={String(prefs.ui.twoPane)} vertical={!prefs.ui.twoPane} defaultSizes={requestSplit.current} onDragEnd={(sizes) => { requestSplit.current = sizes }}>
           <Allotment.Pane minSize={180} preferredSize="55%">
             <RequestEditor
               tab={active}
@@ -682,7 +718,7 @@ export function App() {
               onSaveAs={() => setModal({ kind: 'save', key: active.key })}
               onPasteCurl={pasteCurl(active)}
               onOpenCookies={() => setModal({ kind: 'cookies' })}
-              pickFile={() => window.api.pickFile('Select file')}
+              pickFile={() => window.api.pickFile('Select file', true)}
               onGetOAuth2Token={getOAuth2Token((auth) => dispatch({ type: 'edit', key: active.key, patch: { auth } }))}
             />
           </Allotment.Pane>
@@ -783,6 +819,7 @@ export function App() {
   const modalTab = modal?.kind === 'save' ? state.tabs.find((t) => t.key === modal.key) : undefined
 
   return (
+    <SettingsProvider settings={settings}><VariableNamesContext.Provider value={resolved.map(v => v.key)}>
     <div className="app">
       <AppHeader
         workspace={state.workspace}
@@ -843,10 +880,10 @@ export function App() {
       ) : state.workspace ? (
         <div className="main">
               <Allotment proportionalLayout={false}>
-                <Allotment.Pane preferredSize={240} minSize={180} maxSize={Math.max(180, Math.min(320, viewportWidth * 0.25))} visible={sidebarOpen && viewportWidth >= 750}>
-                  {sidebar}
+                <Allotment.Pane preferredSize={240} minSize={180} maxSize={Math.max(180, Math.min(320, viewportWidth * 0.25))} visible={prefs.ui.swapSidebars ? rightOpen && viewportWidth >= 950 : sidebarOpen && viewportWidth >= 750}>
+                  {prefs.ui.swapSidebars ? rightPanel : sidebar}
                 </Allotment.Pane>
-                <Allotment.Pane>
+                <Allotment.Pane visible={prefs.ui.middleWorkbench}>
                   <div className="workbench">
                     <TabsBar
                       tabs={state.tabs}
@@ -871,8 +908,8 @@ export function App() {
                     </div>
                   </div>
                 </Allotment.Pane>
-                <Allotment.Pane preferredSize={220} minSize={180} maxSize={Math.max(180, Math.min(300, viewportWidth * 0.24))} visible={rightOpen && viewportWidth >= 950}>
-                  {rightPanel}
+                <Allotment.Pane preferredSize={220} minSize={180} maxSize={Math.max(180, Math.min(300, viewportWidth * 0.24))} visible={prefs.ui.swapSidebars ? sidebarOpen && viewportWidth >= 750 : rightOpen && viewportWidth >= 950}>
+                  {prefs.ui.swapSidebars ? sidebar : rightPanel}
                 </Allotment.Pane>
               </Allotment>
         </div>
@@ -917,7 +954,7 @@ export function App() {
       </footer>
 
       {modal?.kind === 'import' && <ImportModal onClose={() => setModal(null)} onImported={(r) => void onImported(r)} />}
-      {modal?.kind === 'settings' && <SettingsModal onClose={() => setModal(null)} onSaved={setSettings} />}
+      {modal?.kind === 'settings' && <SettingsModal onImport={() => setModal({ kind: 'import' })} onClose={() => setModal(null)} onSaved={setSettings} />}
       {modal?.kind === 'cookies' && <CookiesModal onClose={() => setModal(null)} />}
       {modal?.kind === 'mock' && state.workspace && (
         <CreateMockModal
@@ -984,5 +1021,6 @@ export function App() {
         </div>
       )}
     </div>
+    </VariableNamesContext.Provider></SettingsProvider>
   )
 }

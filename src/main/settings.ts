@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { mkdir } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { stableStringify } from '../shared/format/stableJson'
-import { DEFAULT_SETTINGS, type AppSettingsData } from '../shared/settings'
+import { DEFAULT_SETTINGS, THEMES, type AppSettingsData } from '../shared/settings'
 import type { Crypt } from './crypto'
 import { writeFileAtomic } from './workspace/fsAtomic'
 
@@ -45,6 +45,16 @@ export class AppSettings {
       return structuredClone(DEFAULT_SETTINGS)
     }
     const data = merge(DEFAULT_SETTINGS, stored)
+    // Old files gain defaults; malformed enums/ranges must not crash the editor or theme picker.
+    const oneOf = <T,>(value: T, allowed: readonly T[], fallback: T) => allowed.includes(value) ? value : fallback
+    data.general.httpVersion = oneOf(data.general.httpVersion, ['auto', 'http1', 'http2'], 'auto')
+    data.general.responseFormat = oneOf(data.general.responseFormat, ['auto', 'json'], 'auto')
+    data.appearance.mode = oneOf(data.appearance.mode, ['system', 'manual'], 'system')
+    for (const key of ['day', 'night', 'manual'] as const) data.appearance[key] = oneOf(data.appearance[key], THEMES, DEFAULT_SETTINGS.appearance[key])
+    data.editor.indentType = oneOf(data.editor.indentType, ['space', 'tab'], 'space')
+    const range = (value: number, min: number, max: number, fallback: number) => Number.isInteger(value) && value >= min && value <= max ? value : fallback
+    data.editor.fontSize = range(data.editor.fontSize, 8, 40, 12)
+    data.editor.indentCount = range(data.editor.indentCount, 1, 8, 4)
     data.recentWorkspaces = data.recentWorkspaces.filter((s): s is string => typeof s === 'string')
     SECRET_FIELDS(data, (v) => {
       if (!v) return v

@@ -1,3 +1,6 @@
+import { tags } from '@lezer/highlight'
+import { useSettings } from '../../settings'
+import { HighlightStyle, syntaxHighlighting, indentUnit } from '@codemirror/language'
 import { autocompletion, type CompletionContext } from '@codemirror/autocomplete'
 import { html } from '@codemirror/lang-html'
 import { javascript } from '@codemirror/lang-javascript'
@@ -26,8 +29,8 @@ function languageExt(lang: EditorLanguage): Extension {
 }
 
 const theme = EditorView.theme({
-  '&': { height: '100%', fontSize: '12px', backgroundColor: 'var(--bg-primary)' },
-  '.cm-scroller': { fontFamily: 'var(--font-code)', lineHeight: '18px' },
+  '&': { height: '100%', fontSize: 'var(--editor-font-size, 12px)', backgroundColor: 'var(--bg-primary)' },
+  '.cm-scroller': { fontFamily: 'var(--font-code)', lineHeight: '1.5' },
   '.cm-gutters': { backgroundColor: 'var(--bg-primary)', color: 'var(--content-tertiary)', border: 'none' },
   '&.cm-focused': { outline: 'none' },
   '.cm-activeLine, .cm-activeLineGutter': { backgroundColor: 'transparent' },
@@ -47,6 +50,8 @@ interface Props {
 }
 
 export function CodeEditor({ value, onChange, language, readOnly, placeholder, completions, ariaLabel, editorRef }: Props) {
+  const settings = useSettings()
+  const preferences = useRef(new Compartment())
   const host = useRef<HTMLDivElement>(null)
   const view = useRef<EditorView | null>(null)
   const onChangeRef = useRef(onChange)
@@ -66,7 +71,16 @@ export function CodeEditor({ value, onChange, language, readOnly, placeholder, c
         doc: value,
         extensions: [
           basicSetup,
+          preferences.current.of([]),
           theme,
+          syntaxHighlighting(HighlightStyle.define([
+            { tag: [tags.keyword, tags.operator], color: 'var(--syntax-keyword)' },
+            { tag: [tags.string, tags.regexp], color: 'var(--syntax-string)' },
+            { tag: [tags.number, tags.bool, tags.null], color: 'var(--syntax-number)' },
+            { tag: tags.comment, color: 'var(--content-secondary)' },
+            { tag: [tags.propertyName, tags.variableName], color: 'var(--content-primary)' },
+            { tag: [tags.typeName, tags.tagName, tags.attributeName], color: 'var(--link)' },
+          ])),
           lang.current.of(languageExt(language)),
           EditorView.lineWrapping,
           EditorState.readOnly.of(!!readOnly),
@@ -99,6 +113,16 @@ export function CodeEditor({ value, onChange, language, readOnly, placeholder, c
   useEffect(() => {
     view.current?.dispatch({ effects: lang.current.reconfigure(languageExt(language)) })
   }, [language])
+
+  useEffect(() => {
+    const p = settings.editor
+    view.current?.dispatch({ effects: preferences.current.reconfigure([
+      EditorView.theme({ '&': { fontSize: `${p.fontSize}px` }, '.cm-scroller': { fontFamily: p.fontFamily || 'monospace' } }),
+      EditorState.tabSize.of(p.indentCount),
+      indentUnit.of(p.indentType === 'tab' ? '\t' : ' '.repeat(p.indentCount)),
+      EditorState.languageData.of(() => [{ closeBrackets: { brackets: [...(p.closeBrackets ? ['(', '[', '{'] : []), ...(p.closeQuotes ? ["'", '"', '`'] : [])] } }]),
+    ]) })
+  }, [settings.editor, readOnly])
 
   return <div className="code-editor" ref={host} />
 }

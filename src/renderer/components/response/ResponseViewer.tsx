@@ -1,3 +1,4 @@
+import { useSettings } from '../../settings'
 import { ChevronDown, Copy, History, MoreHorizontal, Search } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { openSearchPanel } from '@codemirror/search'
@@ -64,6 +65,7 @@ function MoreButton({ items }: { items: MenuItem[] }) {
 }
 
 export function ResponseViewer({ examples = [], report: liveReport, sending, onCancel, onSaveBody, onSaveExample, past, onShowPast, onClear }: Props) {
+  const settings = useSettings()
   const [selectedExample, setSelectedExample] = useState<number | null>(null)
   const [feedback, setFeedback] = useState('')
   const editor = useRef<EditorView | null>(null)
@@ -75,7 +77,7 @@ export function ResponseViewer({ examples = [], report: liveReport, sending, onC
   const [filter, setFilter] = useState<TestFilter>('all')
   const res = report?.response
   const contentType = res?.ok ? (res.headers.find((h) => h.key.toLowerCase() === 'content-type')?.value ?? '') : ''
-  const view = useMemo(() => (res?.ok ? viewBody(res.body, contentType) : null), [res, contentType])
+  const view = useMemo(() => (res?.ok ? viewBody(res.body, settings.general.responseFormat === 'json' ? 'application/json' : contentType) : null), [res, contentType, settings.general.responseFormat])
   const isImage = /^image\//i.test(contentType)
   const imageUrl = useMemo(() => (res?.ok && isImage ? URL.createObjectURL(new Blob([res.body as BlobPart], { type: contentType })) : null), [res, isImage, contentType])
   useEffect(() => () => void (imageUrl && URL.revokeObjectURL(imageUrl)), [imageUrl])

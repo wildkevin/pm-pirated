@@ -1,9 +1,10 @@
+import { palettes, isDarkTheme } from '../settings'
 import { Trash2 } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { ClientCert, CookieInfo } from '../../shared/engine'
 import type { TreeNode, WorkspaceInfo } from '../../shared/format/types'
 import type { ImportResult } from '../../shared/ipc'
-import { normalizeCertificateHost, type AppSettingsData } from '../../shared/settings'
+import { DEFAULT_SETTINGS, THEMES, normalizeCertificateHost, type AppSettingsData } from '../../shared/settings'
 import { cleanError } from '../lib/body'
 import { Modal, NumericInput, Toggle } from './common/ui'
 
@@ -244,25 +245,34 @@ export function CookiesModal({ onClose }: { onClose(): void }) {
 
 // ---------------- Settings ----------------
 
-type SettingsTab = 'general' | 'proxy' | 'certificates'
+const settingsTabs = ['general', 'themes', 'shortcuts', 'data', 'certificates', 'proxy', 'about'] as const
+type SettingsTab = typeof settingsTabs[number]
 
-export function SettingsModal({ onClose, onSaved }: { onClose(): void; onSaved(s: AppSettingsData): void }) {
+export function SettingsModal({ onClose, onSaved, onImport }: { onClose(): void; onSaved(s: AppSettingsData): void; onImport(): void }) {
   const [s, setS] = useState<AppSettingsData | null>(null)
   const [tab, setTab] = useState<SettingsTab>('general')
+  const [workspace, setWorkspace] = useState<WorkspaceInfo | null>(null)
+  const revision = useRef(0)
+  useEffect(() => { void window.api.currentWorkspace().then(setWorkspace) }, [])
   const [error, setError] = useState<string | null>(null)
   useEffect(() => void window.api.getSettings().then(setS), [])
   if (!s) return null
   const save = async (next: AppSettingsData) => {
+    const version = ++revision.current
     setS(next)
+    onSaved(next)
     try {
       await window.api.saveSettings(next)
-      onSaved(next)
-      setError(null)
+      if (version === revision.current) setError(null)
     } catch (e) {
-      setError(cleanError(e))
+      if (version === revision.current) setError(cleanError(e))
     }
   }
   const g = s.general
+  const ui = s.ui
+  const editor = s.editor
+  const setUI = (patch: Partial<typeof ui>) => void save({ ...s, ui: { ...ui, ...patch } })
+  const setEditor = (patch: Partial<typeof editor>) => void save({ ...s, editor: { ...editor, ...patch } })
   const px = s.proxy
   const cert = s.certificates
   const setG = (patch: Partial<typeof g>) => void save({ ...s, general: { ...g, ...patch } })
@@ -272,36 +282,83 @@ export function SettingsModal({ onClose, onSaved }: { onClose(): void; onSaved(s
 
   return (
     <Modal title="SETTINGS" onClose={onClose} wide className="settings-modal">
-      <div className="subtabs settings-tabs" role="tablist" aria-label="Settings">
-        {(['general', 'certificates', 'proxy'] as const).map((t) => (
+      <div className="settings-layout">
+      <div className="settings-tabs" role="tablist" aria-label="Settings" aria-orientation="vertical">
+        {settingsTabs.map((t) => (
           <button key={t} role="tab" tabIndex={tab === t ? 0 : -1} aria-selected={tab === t} onClick={() => setTab(t)} onKeyDown={(e) => {
-            const tabs = ['general', 'certificates', 'proxy'] as const
+            const tabs = settingsTabs
             const index = tabs.indexOf(t)
-            const next = e.key === 'ArrowRight' ? (index + 1) % 3 : e.key === 'ArrowLeft' ? (index + 2) % 3 : e.key === 'Home' ? 0 : e.key === 'End' ? 2 : -1
+            const next = ['ArrowRight', 'ArrowDown'].includes(e.key) ? (index + 1) % tabs.length : ['ArrowLeft', 'ArrowUp'].includes(e.key) ? (index + tabs.length - 1) % tabs.length : e.key === 'Home' ? 0 : e.key === 'End' ? tabs.length - 1 : -1
             if (next >= 0) { e.preventDefault(); setTab(tabs[next]); (e.currentTarget.parentElement!.children[next] as HTMLElement).focus() }
           }}>
             {t[0].toUpperCase() + t.slice(1)}
           </button>
         ))}
       </div>
-      <div className={`settings-body settings-${tab}`} role="tabpanel">
+      <div className={`settings-body settings-${tab}`} role="tabpanel" aria-label={tab}>
+        <h2 className="settings-page-title">{tab[0].toUpperCase() + tab.slice(1)}</h2>
         {tab === 'general' && (
           <>
             <div className="section-title">Request</div>
+            <SettingSelect label="HTTP version" value={g.httpVersion} options={[['auto', 'Auto'], ['http1', 'HTTP/1.x'], ['http2', 'HTTP/2']]} onChange={v => setG({ httpVersion: v as typeof g.httpVersion })} />
             <SettingNumber label="Request timeout in ms" help="Set how long a request should wait for a response before timing out. To never time out, set to 0." value={g.timeoutMs} onChange={(v) => setG({ timeoutMs: v })} />
             <SettingNumber label="Max response size in MB" help="Set the maximum size of a response to download. To download a response of any size, set to 0." value={g.maxResponseSizeMb} onChange={(v) => setG({ maxResponseSizeMb: v })} />
             <SettingToggle label="SSL certificate verification" value={g.sslVerification} onChange={(v) => setG({ sslVerification: v })} />
-            <SettingToggle label="Automatically follow redirects" value={g.followRedirects} onChange={(v) => setG({ followRedirects: v })} />
-            <SettingToggle label="Send Postman Token header" value={g.sendPostmanToken} onChange={(v) => setG({ sendPostmanToken: v })} />
-            <SettingToggle
-              label="Allow reading files outside working directory"
-              help="The working directory is the workspace folder. Keep this off so shared collections cannot upload files from elsewhere on your computer."
-              value={g.allowFilesOutsideWorkingDir}
-              onChange={(v) => setG({ allowFilesOutsideWorkingDir: v })}
-            />
+            <SettingToggle label="SSL/TLS key log" help="Write TLS session keys to the app's local logs/tls-keys.log file for debugging encrypted connections." value={g.tlsKeyLog} onChange={v => setG({ tlsKeyLog: v })} />
+            <SettingToggle label="Disable cookies" value={g.disableCookies} onChange={v => setG({ disableCookies: v })} />
+            <SettingSelect label="Response format detection" value={g.responseFormat} options={['auto', 'json'].map(v => [v, v === 'auto' ? 'Auto' : 'JSON'])} onChange={v => setG({ responseFormat: v as typeof g.responseFormat })} />
+            <div className="section-title">Working directory</div>
+            <div className="setting-row"><div className="setting-label">Location</div><div className="settings-folder"><span title={g.workingDirectory}>{g.workingDirectory || 'Current workspace folder'}</span><button className="btn btn-secondary" onClick={async () => { const folder = await window.api.pickFolder('location'); if (folder) setG({ workingDirectory: folder }) }}>Choose</button>{g.workingDirectory && <button className="link-btn" onClick={() => setG({ workingDirectory: '' })}>Reset</button>}</div></div>
+            <SettingToggle label="Allow reading files outside working directory" value={g.allowFilesOutsideWorkingDir} onChange={v => setG({ allowFilesOutsideWorkingDir: v })} />
+            <div className="section-title">Headers</div>
+            <SettingToggle label="Send no-cache header" value={g.sendNoCache} onChange={v => setG({ sendNoCache: v })} />
+            <SettingToggle label="Send Postman Token header" value={g.sendPostmanToken} onChange={v => setG({ sendPostmanToken: v })} />
+            <SettingToggle label="Automatically follow redirects" value={g.followRedirects} onChange={v => setG({ followRedirects: v })} />
+            <div className="section-title">User interface</div>
+            <SettingToggle label="Always open sidebar item in new tab" value={ui.alwaysNewTab} onChange={v => setUI({ alwaysNewTab: v })} />
+            <SettingToggle label="Always ask when closing unsaved tabs" value={ui.confirmClose} onChange={v => setUI({ confirmClose: v })} />
+            <SettingToggle label="Show icons with tab names" value={ui.tabIcons} onChange={v => setUI({ tabIcons: v })} />
+            <SettingToggle label="Two-pane view" help="Show the request and response side by side." value={ui.twoPane} onChange={v => setUI({ twoPane: v })} />
+            <SettingToggle label="Show middle workbench" value={ui.middleWorkbench} onChange={v => setUI({ middleWorkbench: v })} />
+            <SettingToggle label="Swap left and right sidebars" value={ui.swapSidebars} onChange={v => setUI({ swapSidebars: v })} />
+            <SettingToggle label="Variable autocomplete" value={ui.variableAutocomplete} onChange={v => setUI({ variableAutocomplete: v })} />
+            <div className="section-title settings-section-heading">Editor settings<button className="link-btn" onClick={() => void save({ ...s, editor: { ...DEFAULT_SETTINGS.editor } })}>Reset</button></div>
+            <div className="setting-row"><label htmlFor="editor-font">Font Family</label><input id="editor-font" className="input settings-font" value={editor.fontFamily} onChange={e => setEditor({ fontFamily: e.target.value })} /></div>
+            <div className="setting-row"><label htmlFor="editor-size">Font Size (px)</label><NumericInput id="editor-size" className="input setting-number" min={8} max={40} value={editor.fontSize} onChange={v => setEditor({ fontSize: v })} /></div>
+            <div className="setting-row"><label htmlFor="editor-indent">Indentation count</label><NumericInput id="editor-indent" className="input setting-number" min={1} max={8} value={editor.indentCount} onChange={v => setEditor({ indentCount: v })} /></div>
+            <SettingSelect label="Indentation type" value={editor.indentType} options={[["space", "Space"], ["tab", "Tab"]]} onChange={v => setEditor({ indentType: v as typeof editor.indentType })} />
+            <SettingToggle label="Auto close brackets" value={editor.closeBrackets} onChange={v => setEditor({ closeBrackets: v })} />
+            <SettingToggle label="Auto close quotes" value={editor.closeQuotes} onChange={v => setEditor({ closeQuotes: v })} />
+            <div className="section-title">Application</div>
+            <div className="setting-row"><span>Language</span><span>English</span></div>
+            <SettingToggle label="Autosave" help="Automatically save edits to requests in collections. New requests still need a name and collection." value={ui.autosave} onChange={v => setUI({ autosave: v })} />
           </>
         )}
-        {tab === 'proxy' && (
+        {tab === 'themes' && <>
+          <SettingSelect label="Theme selection" value={s.appearance.mode} options={[["system", "Sync with system"], ["manual", "Manual"]]} onChange={v => void save({ ...s, appearance: { ...s.appearance, mode: v as 'system' | 'manual' } })} />
+          <div className="theme-cards">{(s.appearance.mode === 'system' ? ['day', 'night'] as const : ['manual'] as const).map(key => {
+            const name = s.appearance[key], palette = palettes[name]
+            return <div className="theme-card" key={key}>
+              <div className="theme-preview" style={{ background: palette[0], color: palette[4], borderColor: palette[3], colorScheme: isDarkTheme(name) ? 'dark' : 'light' }}><div style={{ background: palette[1], borderColor: palette[3] }}>PM Local</div><aside style={{ background: palette[1] }}>Collections<br /><br />Environments</aside><main><span style={{ color: isDarkTheme(name) ? '#77d5a3' : '#007f31' }}>GET</span> &nbsp; https://api.example.com<br /><br /><code>{'{ "status": "ok" }'}</code></main></div>
+              <SettingSelect label={key === 'day' ? 'Day Theme' : key === 'night' ? 'Night Theme' : 'Theme'} value={name} options={THEMES.map(t => [t, t])} onChange={v => void save({ ...s, appearance: { ...s.appearance, [key]: v } })} />
+            </div>
+          })}</div>
+        </>}
+        {tab === 'shortcuts' && <>
+          <SettingToggle label="Keyboard Shortcuts" value={ui.shortcuts} onChange={v => setUI({ shortcuts: v })} />
+          <div className="section-title settings-section-heading">Shortcuts<button className="link-btn" onClick={() => setUI({ shortcuts: true })}>Restore Defaults</button></div>
+          <p className="muted">Use Command on macOS or Ctrl on Windows. Editor editing shortcuts remain available.</p>
+          <div className="shortcut-list">{[['Settings', '⌘ / Ctrl ,'], ['Save request', '⌘ / Ctrl S'], ['Send request', '⌘ / Ctrl Enter'], ['New request tab', '⌘ / Ctrl T'], ['Close tab', '⌘ / Ctrl W'], ['Force close tab', 'Alt ⌘ / Ctrl W'], ['Next tab', 'Shift ⌘ / Ctrl ]'], ['Previous tab', 'Shift ⌘ / Ctrl ['], ['Tab by position', '⌘ / Ctrl 1–8'], ['Last tab', '⌘ / Ctrl 9'], ['Search', '⌘ / Ctrl K'], ['Toggle sidebar', '⌘ / Ctrl \\'], ['Show middle workbench', 'Alt ⌘ / Ctrl M'], ['Swap sidebars', 'Alt ⌘ / Ctrl S']].map(([label, key]) => <div className="setting-row" key={label}><span>{label}</span><kbd>{key}</kbd></div>)}</div>
+        </>}
+        {tab === 'data' && <>
+          <div className="section-title">Import data</div><p className="muted">Import Postman collections, environments, globals, and cURL requests into your workspace.</p><button className="btn btn-secondary" disabled={!workspace} onClick={onImport}>Import Data File</button>
+          <div className="section-title">Export workspace data</div><p className="muted">Export collections and environments as Postman JSON. Current secret variable values stay in the local secret store.</p>
+          {!workspace && <p>Open a workspace to import or export data.</p>}
+          {workspace?.collections.map(c => <div className="setting-row" key={c.id}><span>{c.name}</span><button className="btn btn-secondary" onClick={() => void window.api.exportCollection(c.id).catch(e => setError(cleanError(e)))}>Export collection</button></div>)}
+          {workspace?.environments.map(e => <div className="setting-row" key={e.id}><span>{e.name}</span><button className="btn btn-secondary" onClick={() => void window.api.exportEnvironment(e.id).catch(e => setError(cleanError(e)))}>Export environment</button></div>)}
+        </>}
+        {tab === 'about' && <><div className="section-title">PM Local</div><p>A local API client built on the Postman runtime.</p><p>Collections, environments, history, and settings are stored on your computer.</p><p className="muted">No account, cloud sync, AI services, or usage telemetry.</p></>}
+        {tab === 'proxy'  && (
           <>
             <div className="section-title">Default Proxy Configuration</div>
             <label className="check">
@@ -383,6 +440,7 @@ export function SettingsModal({ onClose, onSaved }: { onClose(): void; onSaved(s
           </>
         )}
       </div>
+      </div>
       {error && (
         <div className="form-error" role="alert">
           {error}
@@ -390,6 +448,10 @@ export function SettingsModal({ onClose, onSaved }: { onClose(): void; onSaved(s
       )}
     </Modal>
   )
+}
+
+function SettingSelect({ label, value, options, onChange }: { label: string; value: string; options: readonly (readonly string[])[]; onChange(value: string): void }) {
+  return <div className="setting-row"><span className="setting-label">{label}</span><select className="select" aria-label={label} value={value} onChange={e => onChange(e.target.value)}>{options.map(([value, title]) => <option value={value} key={value}>{title}</option>)}</select></div>
 }
 
 function SettingToggle({ label, help, value, onChange }: { label: string; help?: string; value: boolean; onChange(v: boolean): void }) {

@@ -1,6 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, net } from 'electron'
 import { randomUUID } from 'node:crypto'
-import { readFile, writeFile } from 'node:fs/promises'
+import { readFile, writeFile, mkdir, open, chmod } from 'node:fs/promises'
 import { isAbsolute, join, relative, resolve } from 'node:path'
 import type { CapturedExchange, LoadSpec, RunnerSpec, SendSpec } from '../shared/engine'
 import type { PmAuth } from '../shared/format/types'
@@ -63,6 +63,20 @@ export function registerIpc(deps: IpcDeps): void {
   }
   /** Saved examples may have changed: running mocks serving that collection reload their routes. */
   const examplesChanged = (id: string) => void deps.mocks.refresh(ws(), store.collectionOf(id)).catch(() => undefined)
+  const requestOptions = async () => {
+    const settings = deps.settings.get()
+    const options = engineOptions(settings, await caFile)
+    if (settings.general.tlsKeyLog) {
+      const dir = join(app.getPath('userData'), 'logs')
+      await mkdir(dir, { recursive: true, mode: 0o700 })
+      const file = join(dir, 'tls-keys.log')
+      const handle = await open(file, 'a', 0o600)
+      await handle.close()
+      await chmod(file, 0o600)
+      options.tlsKeyLogFile = file
+    }
+    return options
+  }
   const cookieFile = () => join(ws(), '.pmlocal', 'cookies.json')
 
   // Files the user picked in a dialog this session; other paths from the window must be in the workspace.
@@ -235,7 +249,7 @@ export function registerIpc(deps: IpcDeps): void {
         globals: await v.effective('globals'),
         cookieFile: cookieFile(),
         workingDir: dir,
-        options: engineOptions(deps.settings.get(), await caFile),
+        options: await requestOptions(),
       }
       const outcome = await deps.engine.call('send', { sendId, spec })
       const { report, variables: after } = outcome
@@ -355,7 +369,7 @@ export function registerIpc(deps: IpcDeps): void {
         persistResponses: config.persistResponses,
         cookieFile: cookieFile(),
         workingDir: dir,
-        options: engineOptions(deps.settings.get(), await caFile),
+        options: await requestOptions(),
       }
       void deps.engine.call('run', { runId, spec }).then(
         async ({ summary, variables: after }) => {
@@ -417,7 +431,7 @@ export function registerIpc(deps: IpcDeps): void {
         profile: config.profile,
         cookieFile: cookieFile(),
         workingDir: dir,
-        options: engineOptions(deps.settings.get(), await caFile),
+        options: await requestOptions(),
       }
       void deps.load.call('start', { runId, spec }).then(
         async (summary) => {
@@ -509,13 +523,14 @@ export function registerIpc(deps: IpcDeps): void {
       await writeFile(res.filePath, body)
       return true
     },
-    async pickFile(title) {
+    async pickFile(title, relativeToWorkingDirectory) {
       const res = await dialog.showOpenDialog(deps.win, { title, properties: ['openFile'] })
       const file = res.filePaths[0]
       if (res.canceled || !file) return null
       pickedFiles.add(resolve(file))
-      if (!root) return file
-      const rel = relative(root, file)
+      const workingDirectory = deps.settings.get().general.workingDirectory || root
+      if (!relativeToWorkingDirectory || !workingDirectory) return file
+      const rel = relative(workingDirectory, file)
       return rel && !rel.startsWith('..') && !isAbsolute(rel) ? rel.split('\\').join('/') : file
     },
   }

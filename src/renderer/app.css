@@ -1,3 +1,4 @@
+@font-face { font-family: IBMPlexMono; src: url('@fontsource/ibm-plex-mono/files/ibm-plex-mono-latin-400-normal.woff2') format('woff2'); font-weight: 400; font-style: normal; font-display: swap; }
 /* Design tokens measured from Postman 12.32.3 (Scratch Pad CSS + live captures, see docs/reference). */
 :root {
   --grey-00: #ffffff;
@@ -42,6 +43,9 @@
   --text-m: 12px;
   --text-l: 14px;
   --font-ui: 'Inter', 'OpenSans', Helvetica, Arial, sans-serif;
+  --syntax-keyword: #7937a4;
+  --syntax-string: #267246;
+  --syntax-number: #a24224;
   --font-code: 'IBM Plex Mono', 'Cousine', monospace;
 }
 
@@ -3091,3 +3095,14 @@ kbd {
 .rp-override-label { display: block; font-size: 10px; color: var(--content-tertiary); }
 
 .workbench-page { height: 100%; min-height: 0; min-width: 0; display: flex; flex-direction: column; }
+
+:root[data-dark="true"] {
+  --syntax-keyword: #d1a7f5; --syntax-string: #9ed8a6; --syntax-number: #f0b98e;
+  --link: #75b5ff; --success: #72cd95; --error: #ff8980; --error-bg: #442b2b; --warn: #eac270;
+  --method-get: #72cd95; --method-post: #eac270; --method-put: #75b5ff; --method-patch: #c7a4e9; --method-delete: #ff8980; --method-head: #72cd95; --method-options: #ef9dcb;
+}
+:root[data-dark="true"] .notice, :root[data-dark="true"] .script-errors { background: #403827; }
+:root[data-dark="true"] .cm-editor { color: var(--content-primary); }
+:root[data-dark="true"] .cm-cursor { border-left-color: var(--content-primary); }
+:root[data-dark="true"] .cm-selectionBackground { background: #44536a !important; }
+:root[data-dark="true"] .cm-tooltip { background: var(--bg-secondary); color: var(--content-primary); border-color: var(--border-strong); }

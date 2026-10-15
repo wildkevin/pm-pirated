@@ -1,3 +1,5 @@
+import { autocompletion, completionKeymap } from '@codemirror/autocomplete'
+import { useSettings, VariableNamesContext } from '../../settings'
 import { Compartment, EditorState } from '@codemirror/state'
 import {
   Decoration,
@@ -9,7 +11,7 @@ import {
   type DecorationSet,
   type ViewUpdate,
 } from '@codemirror/view'
-import { useEffect, useRef } from 'react'
+import { useContext, useEffect, useRef } from 'react'
 import type { ResolvedVariable } from '../../../shared/ipc'
 import { isDynamicVariable } from '../../lib/misc'
 
@@ -98,6 +100,9 @@ interface Props {
 
 /** Single-line input with Postman-style {{variable}} highlighting and hover values. */
 export function VarInput({ value, onChange, onEnter, onPasteCurl, resolve, placeholder, ariaLabel }: Props) {
+  const settings = useSettings()
+  const names = useContext(VariableNamesContext)
+  const completion = useRef(new Compartment())
   const host = useRef<HTMLDivElement>(null)
   const view = useRef<EditorView | null>(null)
   const vars = useRef(new Compartment())
@@ -111,6 +116,7 @@ export function VarInput({ value, onChange, onEnter, onPasteCurl, resolve, place
         doc: value,
         extensions: [
           theme,
+          completion.current.of([]),
           vars.current.of([highlighter(resolve), tooltip(resolve)]),
           placeholderExt(placeholder ?? ''),
           // Single line: newlines from typing or pasting become nothing.
@@ -153,6 +159,17 @@ export function VarInput({ value, onChange, onEnter, onPasteCurl, resolve, place
   useEffect(() => {
     view.current?.dispatch({ effects: vars.current.reconfigure([highlighter(resolve), tooltip(resolve)]) })
   }, [resolve])
+
+  useEffect(() => {
+    view.current?.dispatch({ effects: completion.current.reconfigure(settings.ui.variableAutocomplete ? [
+      autocompletion({ override: [ctx => {
+        const word = ctx.matchBefore(/\{\{[^{}]*/)
+        if (!word) return null
+        const closing = ctx.state.sliceDoc(ctx.pos, ctx.pos + 2) === '}}'
+        return { from: word.from + 2, options: [...new Set(names)].map(name => ({ label: name, apply: name + (closing ? '' : '}}'), type: 'variable' })) }
+      }] }), keymap.of(completionKeymap),
+    ] : []) })
+  }, [settings.ui.variableAutocomplete, names])
 
   // The box is taller than the line: clicks above/below it still focus the input (cursor at the end).
   const focusFromBox = (e: React.MouseEvent) => {

@@ -58,6 +58,10 @@ export function engineOptions(settings: AppSettingsData, extraCaFile: string | u
   const c = proxy.custom
   const protocols = [...(c.http ? ['http' as const] : []), ...(c.https ? ['https' as const] : [])]
   return {
+    httpVersion: general.httpVersion,
+    disableCookies: general.disableCookies,
+    sendNoCache: general.sendNoCache,
+    workingDirectory: general.workingDirectory,
     timeoutMs: general.timeoutMs,
     maxResponseSizeMb: general.maxResponseSizeMb,
     strictSSL: general.sslVerification,

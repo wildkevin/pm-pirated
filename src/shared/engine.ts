@@ -78,6 +78,11 @@ export interface ClientCert {
 }
 
 export interface EngineOptions {
+  httpVersion?: 'auto' | 'http1' | 'http2'
+  disableCookies?: boolean
+  sendNoCache?: boolean
+  tlsKeyLogFile?: string
+  workingDirectory?: string
   timeoutMs: number
   maxResponseSizeMb: number
   strictSSL: boolean

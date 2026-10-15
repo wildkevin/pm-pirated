@@ -1,3 +1,4 @@
+import { DEFAULT_SETTINGS, THEMES } from '../shared/settings'
 import { z } from 'zod'
 import type { Api } from '../shared/ipc'
 
@@ -33,6 +34,12 @@ const settings = z.object({
   recentWorkspaces: z.array(z.string()),
   zoomLevel: z.number().min(-5).max(5),
   general: z.object({
+    httpVersion: z.enum(['auto', 'http1', 'http2']).default('auto'),
+    disableCookies: z.boolean().default(false),
+    sendNoCache: z.boolean().default(true),
+    tlsKeyLog: z.boolean().default(false),
+    workingDirectory: z.string().max(4096).default(''),
+    responseFormat: z.enum(['auto', 'json']).default('auto'),
     timeoutMs: z.number().int().min(0),
     maxResponseSizeMb: z.number().min(0),
     sslVerification: z.boolean(),
@@ -40,6 +47,9 @@ const settings = z.object({
     sendPostmanToken: z.boolean(),
     allowFilesOutsideWorkingDir: z.boolean(),
   }),
+  appearance: z.object({ mode: z.enum(['system', 'manual']), day: z.enum(THEMES), night: z.enum(THEMES), manual: z.enum(THEMES) }).default(DEFAULT_SETTINGS.appearance),
+  editor: z.object({ fontFamily: z.string().max(500), fontSize: z.number().int().min(8).max(40), indentCount: z.number().int().min(1).max(8), indentType: z.enum(['space', 'tab']), closeBrackets: z.boolean(), closeQuotes: z.boolean() }).default(DEFAULT_SETTINGS.editor),
+  ui: z.object({ alwaysNewTab: z.boolean(), confirmClose: z.boolean(), tabIcons: z.boolean(), twoPane: z.boolean(), middleWorkbench: z.boolean(), swapSidebars: z.boolean(), variableAutocomplete: z.boolean(), autosave: z.boolean(), shortcuts: z.boolean() }).default(DEFAULT_SETTINGS.ui),
   proxy: z.object({
     useSystemProxy: z.boolean(),
     respectEnvVars: z.boolean(),
@@ -123,7 +133,7 @@ export const ARGS = {
   exportEnvironment: z.tuple([id]),
   getSettings: z.tuple([]),
   saveSettings: z.tuple([settings]),
-  pickFile: z.tuple([z.string().max(200)]),
+  pickFile: z.tuple([z.string().max(200), z.boolean().optional()]),
   saveResponseBody: z.tuple([z.string().max(255), z.instanceof(Uint8Array)]),
   getOAuth2Token: z.tuple([z.record(z.string(), z.string().max(10_000))]),
   startRun: z.tuple([

@@ -216,7 +216,7 @@ export interface Api {
   /** Save dialog for a response body; false when cancelled. */
   saveResponseBody(defaultName: string, body: Uint8Array): Promise<boolean>
   /** File picker for bodies/certificates; paths inside the workspace come back relative. */
-  pickFile(title: string): Promise<string | null>
+  pickFile(title: string, relativeToWorkingDirectory?: boolean): Promise<string | null>
 }
 
 /** Not request/response calls: the close handshake that lets the UI save unsaved tab state. */

@@ -13,7 +13,7 @@ const tmp = () => mkdtemp(join(tmpdir(), 'pml-set-'))
 describe('AppSettings', () => {
   it('defaults match Postman: no timeout, 50 MB, SSL on, system proxy on, env proxies off', async () => {
     const s = new AppSettings(join(await tmp(), 's.json'), fakeCrypt).get()
-    expect(s.general).toEqual({ timeoutMs: 0, maxResponseSizeMb: 50, sslVerification: true, followRedirects: true, sendPostmanToken: true, allowFilesOutsideWorkingDir: false })
+    expect(s.general).toMatchObject({ timeoutMs: 0, maxResponseSizeMb: 50, sslVerification: true, followRedirects: true, sendPostmanToken: true, allowFilesOutsideWorkingDir: false })
     expect(s.proxy.useSystemProxy).toBe(true)
     expect(s.proxy.respectEnvVars).toBe(false)
   })
@@ -164,4 +164,15 @@ it('keeps an untouched certificate editor draft out of persisted settings', asyn
   await settings.save(next)
   expect(JSON.parse(await readFile(file, 'utf8')).certificates.client).toEqual([{ host: 'api.test', cert: '/client.pem' }])
   expect(settings.get().certificates.client).toHaveLength(2)
+})
+
+it('migrates older preferences and bounds malformed editor and theme values', async () => {
+  const file = join(await tmp(), 'settings.json')
+  await writeFile(file, JSON.stringify({ general: { sslVerification: false }, editor: { indentCount: -3, fontSize: 1000 }, appearance: { day: 'Missing', mode: 'invalid' } }))
+  const settings = new AppSettings(file, fakeCrypt).get()
+  expect(settings.general.sslVerification).toBe(false)
+  expect(settings.general.httpVersion).toBe('auto')
+  expect(settings.editor.indentCount).toBe(4)
+  expect(settings.editor.fontSize).toBe(12)
+  expect(settings.appearance).toEqual({ mode: 'system', day: 'Light', night: 'Dark', manual: 'Light' })
 })

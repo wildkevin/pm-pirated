@@ -347,3 +347,29 @@ it('validates GraphQL variables and file paths after setup scripts resolve them'
   const binary = await send(item(`${base}/x`, { method: 'POST', body: { mode: 'file', file: { src: '{{file}}' } } }, setup))
   expect(echo(binary).body).toBe('dynamic-content')
 })
+
+describe('application request preferences', () => {
+  it('disables implicit cookies and caching headers without deleting the jar', async () => {
+    await send(item(`${base}/login`))
+    expect(echo(await send(item(`${base}/echo`))).headers.cookie).toBe('sid=abc')
+    const disabled = echo(await send(item(`${base}/echo`), { options: { ...options, disableCookies: true, sendNoCache: false, sendPostmanToken: false, httpVersion: 'http1' } }))
+    expect(disabled.headers.cookie).toBeUndefined()
+    expect(disabled.headers['cache-control']).toBeUndefined()
+    expect(disabled.headers['postman-token']).toBeUndefined()
+    const restored = echo(await send(item(`${base}/echo`)))
+    expect(restored.headers.cookie).toBe('sid=abc')
+    expect(restored.headers['cache-control']).toBe('no-cache')
+  })
+
+  it('uses the configured working directory for relative file uploads and enforces its boundary', async () => {
+    const working = await mkdtemp(join(tmpdir(), 'pml-files-'))
+    await writeFile(join(working, 'body.txt'), 'chosen working directory')
+    const request = item(`${base}/echo`, { method: 'POST', body: { mode: 'file', file: { src: 'body.txt' } } })
+    const response = await send(request, { options: { ...options, workingDirectory: working } })
+    expect(echo(response).body).toBe('chosen working directory')
+    await writeFile(join(dir, 'outside.txt'), 'outside')
+    request.request.body = { mode: 'file', file: { src: join(dir, 'outside.txt') } }
+    const blocked = await send(request, { options: { ...options, workingDirectory: working } })
+    expect(blocked.report.response.ok).toBe(false)
+  })
+})

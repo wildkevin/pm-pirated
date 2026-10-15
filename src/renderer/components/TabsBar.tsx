@@ -1,3 +1,4 @@
+import { useSettings } from '../settings'
 import { Blocks, ChevronDown, Folder, Gauge, Globe, Layers, PlayCircle, Plus, Radio, Server, SquareFunction, X } from 'lucide-react'
 import { useEffect, useId, useRef, useState } from 'react'
 import type { EnvironmentInfo } from '../../shared/format/types'
@@ -35,6 +36,7 @@ function TabIcon({ tab }: { tab: Tab }) {
 }
 
 export function TabsBar(p: Props) {
+  const settings = useSettings()
   const row = useRef<HTMLDivElement>(null)
   const environmentId = useId()
   const [rowWidth, setRowWidth] = useState(0)
@@ -111,7 +113,7 @@ export function TabsBar(p: Props) {
                 setMenu({ x: e.clientX, y: e.clientY, key: tab.key })
               }}
             >
-              <TabIcon tab={tab} />
+              {settings.ui.tabIcons && <TabIcon tab={tab} />}
               <span className="tab-name">{title}</span>
               {isDirty(tab) && <span className="tab-dirty" aria-label="Unsaved changes" />}
               <button

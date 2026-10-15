@@ -1,11 +1,20 @@
 import type { ClientCert } from './engine'
 
-/** App settings (Postman's Settings dialog: General, Proxy, Certificates). */
+export const THEMES = ['Light', 'High Contrast Light', 'Ayu Light', 'Night Owl Light', 'Solarized Light', 'Dark', 'High Contrast Dark', 'Ayu Dark', 'Dracula', 'Monokai', 'Night Owl Dark', 'Solarized Dark'] as const
+export type ThemeName = typeof THEMES[number]
+
+/** Local app preferences, stored separately from workspace data. */
 export interface AppSettingsData {
   recentWorkspaces: string[]
   /** Electron zoom level (0 = 100%, each step ≈ ×1.2), like View > Zoom in Postman. */
   zoomLevel: number
   general: {
+    httpVersion: 'auto' | 'http1' | 'http2'
+    disableCookies: boolean
+    sendNoCache: boolean
+    tlsKeyLog: boolean
+    workingDirectory: string
+    responseFormat: 'auto' | 'json'
     /** 0 = never time out. */
     timeoutMs: number
     /** 0 = no limit. */
@@ -16,6 +25,9 @@ export interface AppSettingsData {
     /** Off by default: a shared collection must not be able to upload e.g. ~/.ssh/id_rsa. */
     allowFilesOutsideWorkingDir: boolean
   }
+  appearance: { mode: 'system' | 'manual'; day: ThemeName; night: ThemeName; manual: ThemeName }
+  editor: { fontFamily: string; fontSize: number; indentCount: number; indentType: 'space' | 'tab'; closeBrackets: boolean; closeQuotes: boolean }
+  ui: { alwaysNewTab: boolean; confirmClose: boolean; tabIcons: boolean; twoPane: boolean; middleWorkbench: boolean; swapSidebars: boolean; variableAutocomplete: boolean; autosave: boolean; shortcuts: boolean }
   proxy: {
     useSystemProxy: boolean
     respectEnvVars: boolean
@@ -43,7 +55,10 @@ export interface AppSettingsData {
 export const DEFAULT_SETTINGS: AppSettingsData = {
   recentWorkspaces: [],
   zoomLevel: 0,
-  general: { timeoutMs: 0, maxResponseSizeMb: 50, sslVerification: true, followRedirects: true, sendPostmanToken: true, allowFilesOutsideWorkingDir: false },
+  general: { httpVersion: 'auto', disableCookies: false, sendNoCache: true, tlsKeyLog: false, workingDirectory: '', responseFormat: 'auto', timeoutMs: 0, maxResponseSizeMb: 50, sslVerification: true, followRedirects: true, sendPostmanToken: true, allowFilesOutsideWorkingDir: false },
+  appearance: { mode: 'system', day: 'Light', night: 'Dark', manual: 'Light' },
+  editor: { fontFamily: "'IBM Plex Mono', Monaco, 'Courier New', monospace", fontSize: 12, indentCount: 4, indentType: 'space', closeBrackets: true, closeQuotes: true },
+  ui: { alwaysNewTab: false, confirmClose: true, tabIcons: true, twoPane: false, middleWorkbench: true, swapSidebars: false, variableAutocomplete: true, autosave: false, shortcuts: true },
   proxy: {
     useSystemProxy: true,
     respectEnvVars: false,
