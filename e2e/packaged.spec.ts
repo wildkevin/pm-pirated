@@ -35,12 +35,13 @@ test('packaged app: request engine, mock server and capture proxy processes all 
   await page.getByRole('button', { name: 'New request tab' }).click()
   await page.getByLabel('Request URL').fill(`${base}/x`)
   await page.getByRole('button', { name: 'Send', exact: true }).click()
-  await expect(page.getByTestId('response-body')).toContainText('"packaged": true')
+  // On failure, say what the response area shows (error text, still sending, …).
+  await expect(page.getByTestId('response-body'), await page.waitForTimeout(3000).then(() => page.locator('.response').first().innerText().catch((e) => String(e)))).toContainText('"packaged": true')
 
   // Capture proxy process.
   const proxyPort = await freePort()
   await page.locator('.status-bar').getByRole('button', { name: /Capture/ }).click()
-  await page.getByLabel('Port').fill(String(proxyPort))
+  await page.getByLabel('Port', { exact: true }).fill(String(proxyPort))
   await page.getByRole('button', { name: 'Start proxy' }).click()
   await expect(page.getByTestId('capture-status')).toHaveText(`Listening on 127.0.0.1:${proxyPort}`)
   await page.getByRole('button', { name: 'Stop proxy' }).click()

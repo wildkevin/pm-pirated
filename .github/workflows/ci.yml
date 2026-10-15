@@ -17,6 +17,11 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run test:e2e
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-results-${{ matrix.os }}
+          path: test-results/
 
   # Portable Windows app: download "PM-Local-windows" from the run's Artifacts.
   package-windows:
@@ -33,6 +38,11 @@ jobs:
       - name: Smoke-test the packaged app
         shell: bash
         run: PM_LOCAL_EXE="$PWD/dist/win-unpacked/PM Local.exe" npx playwright test e2e/packaged.spec.ts
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: packaged-results
+          path: test-results/
       - uses: actions/upload-artifact@v4
         with:
           name: PM-Local-windows
