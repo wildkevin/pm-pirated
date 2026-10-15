@@ -6,7 +6,7 @@
 // which a shared file could forge), and are moved explicitly when an environment/collection is renamed.
 import { randomUUID } from 'node:crypto'
 import { lstatSync } from 'node:fs'
-import { copyFile, mkdir, readdir, readFile, rename, rm } from 'node:fs/promises'
+import { lstat, mkdir, readdir, readFile, rename, rm } from 'node:fs/promises'
 import { basename, dirname, join, resolve } from 'node:path'
 import { sanitizeName, uniqueName } from '../../shared/format/names'
 import { stableStringify } from '../../shared/format/stableJson'
@@ -109,11 +109,21 @@ export class Variables {
     `${this.secretPrefix(scope)}${encodeURIComponent(key)}::${which}`
 
   private async readCurrent(): Promise<Record<string, Record<string, string>>> {
+    const file = this.currentFile()
+    let text: string
     try {
-      return await readJsonFile(this.currentFile())
-    } catch (e) {
-      // Damaged file: keep a copy before the next write replaces it, so the values can be recovered.
-      if (!isEnoent(e)) await copyFile(this.currentFile(), `${this.currentFile()}.corrupt`).catch(() => undefined)
+      // Never follow a symlink planted in the workspace (it may come from a cloned repository).
+      if ((await lstat(file)).isSymbolicLink()) return {}
+      text = await readFile(file, 'utf8')
+    } catch {
+      return {}
+    }
+    try {
+      return JSON.parse(text.replace(/^\uFEFF/, ''))
+    } catch {
+      // Damaged JSON: keep a copy before the next write replaces it, so the values can be recovered.
+      // Temp file + rename replaces whatever is at the backup path instead of writing through a link.
+      await writeFileAtomic(`${file}.corrupt`, text).catch(() => undefined)
       return {}
     }
   }

@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { beforeEach, describe, expect, it } from 'vitest'
@@ -176,5 +176,14 @@ describe('concurrent script changes (QA VAR-1 / RUN-1)', () => {
     await writeFile(join(root, '.pmlocal', 'current-values.json'), '{"globals": {"a": "1"}}garbage')
     await vars.applyChanges('globals', [{ key: 'b', value: '2' }])
     expect(await readFile(join(root, '.pmlocal', 'current-values.json.corrupt'), 'utf8')).toContain('garbage')
+  })
+
+  it('never writes through a symlink planted at the backup path', async () => {
+    const victim = join(await mkdtemp(join(tmpdir(), 'pml-victim-')), 'victim.txt')
+    await writeFile(victim, 'precious')
+    await symlink(victim, join(root, '.pmlocal', 'current-values.json.corrupt'))
+    await writeFile(join(root, '.pmlocal', 'current-values.json'), 'not json')
+    await vars.applyChanges('globals', [{ key: 'b', value: '2' }])
+    expect(await readFile(victim, 'utf8')).toBe('precious')
   })
 })
