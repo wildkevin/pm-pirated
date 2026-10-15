@@ -2,37 +2,75 @@ import { readFileSync } from 'node:fs'
 import { mkdir } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { stableStringify } from '../shared/format/stableJson'
+import { DEFAULT_SETTINGS, type AppSettingsData } from '../shared/settings'
+import type { Crypt } from './crypto'
 import { writeFileAtomic } from './workspace/fsAtomic'
 
-export interface Settings {
-  recentWorkspaces: string[]
+/** Deep-merges stored values over defaults so new settings get defaults and wrong types are ignored. */
+function merge<T>(defaults: T, stored: unknown): T {
+  if (Array.isArray(defaults)) return (Array.isArray(stored) ? stored : defaults) as T
+  if (defaults && typeof defaults === 'object') {
+    const src = stored && typeof stored === 'object' ? (stored as Record<string, unknown>) : {}
+    return Object.fromEntries(
+      Object.entries(defaults as Record<string, unknown>).map(([k, v]) => [k, merge(v, src[k])]),
+    ) as T
+  }
+  return (typeof stored === typeof defaults ? stored : defaults) as T
 }
 
-function load(file: string): Settings {
-  try {
-    const d = JSON.parse(readFileSync(file, 'utf8'))
-    const recent = Array.isArray(d.recentWorkspaces) ? d.recentWorkspaces : []
-    return { recentWorkspaces: recent.filter((s: unknown): s is string => typeof s === 'string') }
-  } catch {
-    return { recentWorkspaces: [] }
-  }
+// Passwords are stored encrypted; these are the paths that hold them.
+type Mapper = (s: AppSettingsData, f: (v: string) => string) => void
+const SECRET_FIELDS: Mapper = (s, f) => {
+  s.proxy.auth.password = f(s.proxy.auth.password)
+  s.proxy.custom.auth.password = f(s.proxy.custom.auth.password)
+  for (const c of s.certificates.client) if (c.passphrase) c.passphrase = f(c.passphrase)
 }
 
 /** App-level settings in %APPDATA%/pm-local/settings.json. */
 export class AppSettings {
-  private data: Settings
+  private data: AppSettingsData
 
-  constructor(private file: string) {
-    this.data = load(file)
+  constructor(
+    private file: string,
+    private crypt: Crypt,
+  ) {
+    this.data = this.load()
   }
 
-  get(): Settings {
-    return this.data
+  private load(): AppSettingsData {
+    let stored: unknown
+    try {
+      stored = JSON.parse(readFileSync(this.file, 'utf8'))
+    } catch {
+      return structuredClone(DEFAULT_SETTINGS)
+    }
+    const data = merge(DEFAULT_SETTINGS, stored)
+    data.recentWorkspaces = data.recentWorkspaces.filter((s): s is string => typeof s === 'string')
+    SECRET_FIELDS(data, (v) => {
+      if (!v) return v
+      try {
+        return this.crypt.decrypt(v)
+      } catch {
+        return '' // encrypted by another Windows user/machine: ask again rather than crash
+      }
+    })
+    return data
+  }
+
+  get(): AppSettingsData {
+    return structuredClone(this.data)
+  }
+
+  async save(next: AppSettingsData): Promise<void> {
+    this.data = merge(DEFAULT_SETTINGS, structuredClone(next))
+    const onDisk = structuredClone(this.data)
+    SECRET_FIELDS(onDisk, (v) => (v ? this.crypt.encrypt(v) : v))
+    await mkdir(dirname(this.file), { recursive: true })
+    await writeFileAtomic(this.file, stableStringify(onDisk))
   }
 
   async rememberWorkspace(dir: string): Promise<void> {
-    this.data.recentWorkspaces = [dir, ...this.data.recentWorkspaces.filter((d) => d !== dir)].slice(0, 10)
-    await mkdir(dirname(this.file), { recursive: true })
-    await writeFileAtomic(this.file, stableStringify(this.data))
+    const recent = [dir, ...this.data.recentWorkspaces.filter((d) => d !== dir)].slice(0, 10)
+    await this.save({ ...this.data, recentWorkspaces: recent })
   }
 }

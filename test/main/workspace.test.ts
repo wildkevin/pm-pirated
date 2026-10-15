@@ -10,6 +10,9 @@ import {
   deleteNode,
   initWorkspace,
   isWorkspace,
+  loadChain,
+  readContainer,
+  saveContainer,
   openWorkspace,
   readRequest,
   renameNode,
@@ -174,6 +177,43 @@ describe('resolveInside', () => {
     expect(resolveInside(root, 'collections/A/b.request.json')).toBe(
       join(root, 'collections', 'A', 'b.request.json'),
     )
+  })
+})
+
+describe('collection and folder settings', () => {
+  beforeEach(() => initWorkspace(root).then(() => undefined))
+
+  it('saves auth, scripts and description, and loads the chain for a request', async () => {
+    const col = await createCollection(root, 'C')
+    const folder = await createFolder(root, col, 'F')
+    const req = await createRequest(root, folder, 'R', {
+      name: 'ignored',
+      request: { method: 'POST', url: 'http://x', header: [] },
+      event: [{ listen: 'test', script: { exec: ['1'] } }],
+    })
+    const auth = { type: 'bearer', bearer: [{ key: 'token', value: 't' }] }
+    await saveContainer(root, col, { auth, description: 'Docs' })
+    await saveContainer(root, folder, { event: [{ listen: 'prerequest', script: { exec: ['x'] } }] })
+    expect(await readContainer(root, col)).toEqual({ name: 'C', auth, description: 'Docs' })
+    const chain = await loadChain(root, req)
+    expect(chain.collectionId).toBe(col)
+    expect(chain.parents.map((p) => p.name)).toEqual(['C', 'F'])
+    expect(chain.parents[1].event).toHaveLength(1)
+    expect((await readRequest(root, req)).request.method).toBe('POST')
+    expect((await readRequest(root, req)).name).toBe('R')
+
+    // clearing auth goes back to inherit; collection info (id, schema) survives
+    await saveContainer(root, col, { description: 'Docs' })
+    expect((await readContainer(root, col)).auth).toBeUndefined()
+    const meta = JSON.parse(await readFile(join(root, col, 'collection.json'), 'utf8'))
+    expect(meta.info._postman_id).toMatch(/[0-9a-f-]{36}/)
+    expect(meta.order).toEqual(['F'])
+  })
+
+  it('lists environments with the workspace', async () => {
+    await mkdir(join(root, 'environments'))
+    await writeFile(join(root, 'environments', 'Dev.env.json'), JSON.stringify({ name: 'Dev', values: [] }))
+    expect((await openWorkspace(root)).environments).toEqual([{ id: 'environments/Dev.env.json', name: 'Dev' }])
   })
 })
 

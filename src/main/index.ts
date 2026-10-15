@@ -1,7 +1,10 @@
-import { app, session, utilityProcess } from 'electron'
+import { app, safeStorage, session, utilityProcess } from 'electron'
 import { join } from 'node:path'
+import { safeStorageCrypt } from './crypto'
 import { EngineClient, type EngineProcess } from './engineClient'
 import { registerIpc } from './ipc'
+import { systemProxyFor, writeCaBundle } from './netconfig'
+import { SecretStore } from './secrets'
 import { AppSettings } from './settings'
 import { createMainWindow } from './window'
 
@@ -24,10 +27,17 @@ if (!app.requestSingleInstanceLock()) {
 } else {
   void app.whenReady().then(() => {
     session.defaultSession.setPermissionRequestHandler((_wc, _perm, cb) => cb(false))
-    const settings = new AppSettings(join(app.getPath('userData'), 'settings.json'))
-    const engine = new EngineClient(forkEngine, (code) => console.error(`Engine process exited with code ${code}`))
+    const userData = app.getPath('userData')
+    const crypt = safeStorageCrypt(safeStorage)
+    const settings = new AppSettings(join(userData, 'settings.json'), crypt)
+    const secrets = new SecretStore(join(userData, 'secrets.json'), crypt)
+    const engine = new EngineClient(
+      forkEngine,
+      (url) => systemProxyFor((u) => session.defaultSession.resolveProxy(u), url, settings.get()),
+      (code) => console.error(`Engine process exited with code ${code}`),
+    )
     const win = createMainWindow()
-    registerIpc({ win, settings, engine })
+    registerIpc({ win, settings, secrets, engine, caBundle: () => writeCaBundle(join(userData, 'ca-bundle.pem'), settings.get()) })
     app.on('second-instance', () => {
       if (win.isMinimized()) win.restore()
       win.focus()

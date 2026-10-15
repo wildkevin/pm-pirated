@@ -3,8 +3,10 @@ import { mkdir, readdir, readFile, rename, rm, stat } from 'node:fs/promises'
 import { basename, dirname, join, relative, resolve, sep } from 'node:path'
 import { sanitizeName, uniqueName } from '../../shared/format/names'
 import { stableStringify } from '../../shared/format/stableJson'
-import { COLLECTION_SCHEMA, type PmItem, type TreeNode, type WorkspaceInfo } from '../../shared/format/types'
+import { randomUUID } from 'node:crypto'
+import { COLLECTION_SCHEMA, type PmContainer, type PmItem, type TreeNode, type WorkspaceInfo } from '../../shared/format/types'
 import { writeFileAtomic } from './fsAtomic'
+import { listEnvironments } from './variables'
 
 export class WorkspaceError extends Error {}
 
@@ -13,7 +15,7 @@ const REQ_EXT = '.request.json'
 interface DirMeta {
   order?: string[]
   name?: string
-  info?: { name?: string; schema?: string }
+  info?: { name?: string; schema?: string; _postman_id?: string; description?: string }
   [extra: string]: unknown
 }
 
@@ -94,7 +96,12 @@ export async function openWorkspace(root: string): Promise<WorkspaceInfo> {
   const collections = await Promise.all(
     entries.filter((e) => e.isDirectory()).map((e) => loadDir(root, join(dir, e.name), 'collection')),
   )
-  return { root, name: meta.name ?? basename(root), collections: collections.sort((a, b) => a.name.localeCompare(b.name)) }
+  return {
+    root,
+    name: meta.name ?? basename(root),
+    collections: collections.sort((a, b) => a.name.localeCompare(b.name)),
+    environments: await listEnvironments(root),
+  }
 }
 
 async function loadDir(root: string, abs: string, kind: 'collection' | 'folder'): Promise<TreeNode> {
@@ -147,30 +154,33 @@ async function updateOrder(root: string, dirAbs: string, change: (order: string[
   await writeFileAtomic(file, stableStringify(meta))
 }
 
-export async function createCollection(root: string, name: string): Promise<string> {
+/** `extra` carries imported content (auth, event, variable, description…). */
+export async function createCollection(root: string, name: string, extra: Partial<PmContainer> = {}): Promise<string> {
   const base = collectionsDir(root)
   await mkdir(base, { recursive: true })
   const abs = join(base, uniqueName(sanitizeName(name), await entryNames(base)))
   await mkdir(abs)
-  await writeFileAtomic(join(abs, 'collection.json'), stableStringify({ info: { name, schema: COLLECTION_SCHEMA }, order: [] }))
+  const { description, name: _n, ...rest } = extra
+  const info = { name, schema: COLLECTION_SCHEMA, _postman_id: randomUUID(), ...(description ? { description } : {}) }
+  await writeFileAtomic(join(abs, 'collection.json'), stableStringify({ ...rest, info, order: [] }))
   return toId(root, abs)
 }
 
-export async function createFolder(root: string, parentId: string, name: string): Promise<string> {
+export async function createFolder(root: string, parentId: string, name: string, extra: Partial<PmContainer> = {}): Promise<string> {
   const parent = resolveInside(root, parentId)
   await readMeta(metaPath(root, parent)) // fail before touching disk if the parent meta is damaged
   const dirName = uniqueName(sanitizeName(name), await entryNames(parent))
   await mkdir(join(parent, dirName))
-  await writeFileAtomic(join(parent, dirName, 'folder.json'), stableStringify({ name, order: [] }))
+  await writeFileAtomic(join(parent, dirName, 'folder.json'), stableStringify({ ...extra, name, order: [] }))
   await updateOrder(root, parent, (o) => [...o, dirName])
   return toId(root, join(parent, dirName))
 }
 
-export async function createRequest(root: string, parentId: string, name: string): Promise<string> {
+export async function createRequest(root: string, parentId: string, name: string, content?: PmItem): Promise<string> {
   const parent = resolveInside(root, parentId)
   await readMeta(metaPath(root, parent))
   const fileName = uniqueName(sanitizeName(name), await entryNames(parent), REQ_EXT)
-  const item: PmItem = { name, request: { method: 'GET', url: '', header: [] }, response: [] }
+  const item: PmItem = content ? { ...content, name } : { name, request: { method: 'GET', url: '', header: [] }, response: [] }
   await writeFileAtomic(join(parent, fileName), stableStringify(item))
   await updateOrder(root, parent, (o) => [...o, fileName])
   return toId(root, join(parent, fileName))
@@ -222,4 +232,49 @@ export async function deleteNode(root: string, id: string): Promise<void> {
   await rm(abs, { recursive: true, force: true })
   const entry = basename(abs)
   await updateOrder(root, dirname(abs), (o) => o.filter((n) => n !== entry)).catch(() => undefined)
+}
+
+/** Auth, scripts and description of a collection or folder (variables are handled by Variables). */
+export async function readContainer(root: string, id: string): Promise<PmContainer> {
+  const abs = resolveInside(root, id)
+  if (abs.endsWith(REQ_EXT)) throw new WorkspaceError(`Not a collection or folder: ${id}`)
+  const meta = await readMeta(metaPath(root, abs))
+  const collection = isCollectionDir(root, abs)
+  const name = (collection ? meta.info?.name : meta.name) ?? basename(abs)
+  const description = (collection ? meta.info?.description : (meta.description as string | undefined)) ?? undefined
+  return {
+    name,
+    ...(meta.auth ? { auth: meta.auth as PmContainer['auth'] } : {}),
+    ...(meta.event ? { event: meta.event as PmContainer['event'] } : {}),
+    ...(description ? { description } : {}),
+  }
+}
+
+/** Replaces auth/event/description; `auth: undefined` means inherit (folders) or none (collections). */
+export async function saveContainer(root: string, id: string, data: Pick<PmContainer, 'auth' | 'event' | 'description'>): Promise<void> {
+  const abs = resolveInside(root, id)
+  if (abs.endsWith(REQ_EXT)) throw new WorkspaceError(`Not a collection or folder: ${id}`)
+  const file = metaPath(root, abs)
+  const meta = await readMeta(file)
+  const { auth: _a, event: _e, description: _d, ...rest } = meta
+  const next: DirMeta = { ...rest, ...(data.auth ? { auth: data.auth } : {}), ...(data.event?.length ? { event: data.event } : {}) }
+  if (isCollectionDir(root, abs)) {
+    const { description: _old, ...info } = meta.info ?? {}
+    next.info = { ...info, ...(data.description ? { description: data.description } : {}) }
+  } else if (data.description) next.description = data.description
+  await writeFileAtomic(file, stableStringify(next))
+}
+
+/** Collection first, then each folder down to the request's parent; plus the collection's id. */
+export async function loadChain(root: string, requestId: string): Promise<{ collectionId: string; parents: PmContainer[] }> {
+  const abs = requestPath(root, requestId)
+  const dirs: string[] = []
+  for (let d = dirname(abs); d !== collectionsDir(root); d = dirname(d)) dirs.unshift(d)
+  const parents = await Promise.all(dirs.map((d) => readContainer(root, toId(root, d))))
+  return { collectionId: toId(root, dirs[0]), parents }
+}
+
+/** Collection id (collections/<dir>) of any node id. */
+export function collectionOf(id: string): string {
+  return id.split('/').slice(0, 2).join('/')
 }
