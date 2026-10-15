@@ -364,3 +364,37 @@ test('performance test runs virtual users and reports metrics', async () => {
   await expect(page.getByText('Past tests')).toBeVisible()
   await app.close()
 })
+
+test('zoom with Ctrl+= / Ctrl+- / Ctrl+0 is remembered; the sidebar can be hidden', async () => {
+  const userData = await temp('pml-ud-')
+  const key = (app: ElectronApplication, keyCode: string) =>
+    app.evaluate(({ BrowserWindow }, k) => {
+      // Real input path (before-input-event), unlike Playwright's synthetic key events.
+      const wc = BrowserWindow.getAllWindows()[0].webContents
+      wc.sendInputEvent({ type: 'keyDown', keyCode: k, modifiers: ['control'] })
+      wc.sendInputEvent({ type: 'keyUp', keyCode: k, modifiers: ['control'] })
+    }, keyCode)
+  const zoom = (app: ElectronApplication) => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.getZoomLevel())
+
+  let app = await launch(userData)
+  let page = await app.firstWindow()
+  await stubDialogs(app, await temp('pml-ws-'))
+  await openWorkspace(page)
+  await key(app, '=')
+  await key(app, '=')
+  await key(app, '-')
+  await expect.poll(() => zoom(app)).toBe(0.5)
+  await page.getByRole('button', { name: 'Hide sidebar' }).click()
+  await expect(page.getByRole('button', { name: 'New collection' })).toBeHidden()
+  await page.getByRole('button', { name: 'Show sidebar' }).click()
+  await expect(page.getByRole('button', { name: 'New collection' })).toBeVisible()
+  await app.close()
+
+  app = await launch(userData)
+  page = await app.firstWindow()
+  await expect(page.getByRole('button', { name: 'New collection' })).toBeVisible()
+  await expect.poll(() => zoom(app)).toBe(0.5)
+  await key(app, '0')
+  await expect.poll(() => zoom(app)).toBe(0)
+  await app.close()
+})

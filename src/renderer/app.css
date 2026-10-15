@@ -2101,3 +2101,27 @@ kbd {
 .load-table th:first-child {
   width: 30%;
 }
+
+/* Narrow windows / high zoom: wrap instead of breaking words, shrink the environment picker. */
+.response-head {
+  flex-wrap: wrap;
+  column-gap: 16px;
+}
+.response-meta {
+  margin-left: auto;
+  white-space: nowrap;
+}
+.response-meta > span {
+  white-space: nowrap;
+}
+.env-selector {
+  flex: none;
+}
+.env-select {
+  width: 190px;
+  min-width: 110px;
+  max-width: 26vw;
+}
+.editor-title .btn {
+  flex: none;
+}

@@ -73,7 +73,13 @@ if (!app.requestSingleInstanceLock()) {
       (url) => systemProxyFor((u) => session.defaultSession.resolveProxy(u), url, settings.get()),
       (code) => console.error(`Engine process exited with code ${code}`),
     )
-    const win = createMainWindow()
+    // Remember the zoom level between sessions (keyboard and View-menu zoom alike).
+    const saveZoom = (zoomLevel: number) => {
+      if (zoomLevel !== settings.get().zoomLevel) void settings.save({ ...settings.get(), zoomLevel })
+    }
+    const win = createMainWindow(saveZoom)
+    win.webContents.on('did-finish-load', () => win.webContents.setZoomLevel(settings.get().zoomLevel))
+    win.on('close', () => saveZoom(win.webContents.getZoomLevel()))
     const mockClient = new MockClient(forkMocks, (code) => console.error(`Mock server process exited with code ${code}`))
     const mocks = new MockManager(mockClient, (e) => !win.isDestroyed() && win.webContents.send(MOCK_EVENT, e))
     // Upstream for captured traffic: the proxy Windows used before capture took over (incl. PAC).

@@ -48,7 +48,17 @@ export function mainWindowOptions(preload: string): BrowserWindowConstructorOpti
   }
 }
 
-export function createMainWindow(): BrowserWindow {
+/** Zoom steps match Chromium's (level 1 ≈ 120%); clamped to 50%–300%. */
+export const ZOOM_MIN = -3.8
+export const ZOOM_MAX = 6
+export function nextZoom(level: number, key: string): number | null {
+  if (key === '0' || key === 'Numpad0') return 0
+  if (key === '=' || key === '+' || key === 'NumpadAdd') return Math.min(ZOOM_MAX, Math.round((level + 0.5) * 10) / 10)
+  if (key === '-' || key === '_' || key === 'NumpadSubtract') return Math.max(ZOOM_MIN, Math.round((level - 0.5) * 10) / 10)
+  return null
+}
+
+export function createMainWindow(onZoom: (level: number) => void = () => undefined): BrowserWindow {
   const win = new BrowserWindow(mainWindowOptions(join(__dirname, '../preload/index.js')))
   const loc = rendererLocation()
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
@@ -56,6 +66,15 @@ export function createMainWindow(): BrowserWindow {
     if (!isTrustedUrl(url, loc)) e.preventDefault()
   })
   win.once('ready-to-show', () => win.show())
+  // Ctrl/Cmd + = / - / 0 zoom (Electron's menu only reacts to Ctrl+Shift+= on Windows).
+  win.webContents.on('before-input-event', (e, input) => {
+    if (input.type !== 'keyDown' || !(input.control || input.meta) || input.alt) return
+    const level = nextZoom(win.webContents.getZoomLevel(), input.code.startsWith('Numpad') ? input.code : input.key)
+    if (level === null) return
+    e.preventDefault()
+    win.webContents.setZoomLevel(level)
+    onZoom(level)
+  })
   // Let the renderer save open tabs (unsaved edits included) before the window goes away.
   let closing = false
   const reallyClose = () => {

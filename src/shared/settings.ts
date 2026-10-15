@@ -3,6 +3,8 @@ import type { ClientCert } from './engine'
 /** App settings (Postman's Settings dialog: General, Proxy, Certificates). */
 export interface AppSettingsData {
   recentWorkspaces: string[]
+  /** Electron zoom level (0 = 100%, each step ≈ ×1.2), like View > Zoom in Postman. */
+  zoomLevel: number
   general: {
     /** 0 = never time out. */
     timeoutMs: number
@@ -40,6 +42,7 @@ export interface AppSettingsData {
 
 export const DEFAULT_SETTINGS: AppSettingsData = {
   recentWorkspaces: [],
+  zoomLevel: 0,
   general: { timeoutMs: 0, maxResponseSizeMb: 50, sslVerification: true, followRedirects: true, sendPostmanToken: true, allowFilesOutsideWorkingDir: false },
   proxy: {
     useSystemProxy: true,

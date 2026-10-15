@@ -30,6 +30,7 @@ const uiState = z.object({
 const userPass = z.object({ enabled: z.boolean(), username: z.string(), password: z.string() })
 const settings = z.object({
   recentWorkspaces: z.array(z.string()),
+  zoomLevel: z.number().min(-5).max(5),
   general: z.object({
     timeoutMs: z.number().int().min(0),
     maxResponseSizeMb: z.number().min(0),

@@ -1,5 +1,5 @@
 import { Allotment } from 'allotment'
-import { Code2, FolderOpen, PlayCircle, Radio, Settings as SettingsIcon, Terminal } from 'lucide-react'
+import { Code2, FolderOpen, PanelLeft, PlayCircle, Radio, Settings as SettingsIcon, Terminal } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import type { RunReport } from '../shared/engine'
 import type { PmAuth, PmItem, TreeNode } from '../shared/format/types'
@@ -59,6 +59,13 @@ export function App() {
   const [consoleEntries, setConsoleEntries] = useState<ConsoleEntry[]>([])
   const [modal, setModal] = useState<ModalState>(null)
   const [codeOpen, setCodeOpen] = useState(false)
+  // Hide the sidebar for more room on small screens or at high zoom (Postman: Ctrl+\).
+  const [sidebarOpen, setSidebarOpen] = useState(() => localStorage.getItem('pm-local.sidebar') !== 'hidden')
+  const toggleSidebar = () =>
+    setSidebarOpen((open) => {
+      localStorage.setItem('pm-local.sidebar', open ? 'hidden' : 'shown')
+      return !open
+    })
   const [mocks, setMocks] = useState<MockInfo[]>([])
   const [mockLogs, setMockLogs] = useState<Record<string, MockLogEntry[]>>({})
   const [capture, setCapture] = useState<CaptureState | null>(null)
@@ -282,6 +289,9 @@ export function App() {
       } else if (k === 'w' && tab) {
         e.preventDefault()
         close(tab)
+      } else if (e.key === '\\') {
+        e.preventDefault()
+        toggleSidebar()
       }
     }
     window.addEventListener('keydown', onKey)
@@ -583,7 +593,7 @@ export function App() {
           <Allotment vertical proportionalLayout={false}>
             <Allotment.Pane>
               <Allotment proportionalLayout={false}>
-                <Allotment.Pane preferredSize={340} minSize={240} maxSize={640}>
+                <Allotment.Pane preferredSize={340} minSize={240} maxSize={640} visible={sidebarOpen}>
                   <Sidebar
                     workspace={state.workspace}
                     panel={panel}
@@ -634,6 +644,9 @@ export function App() {
       )}
 
       <footer className="status-bar">
+        <button className={`status-btn${sidebarOpen ? '' : ' active'}`} aria-label={sidebarOpen ? 'Hide sidebar' : 'Show sidebar'} title="Toggle sidebar (Ctrl+\\)" disabled={!state.workspace} onClick={toggleSidebar}>
+          <PanelLeft size={12} />
+        </button>
         <button className={`status-btn${consoleOpen ? ' active' : ''}`} onClick={() => setConsoleOpen(!consoleOpen)} disabled={!state.workspace}>
           <Terminal size={12} /> Console
         </button>

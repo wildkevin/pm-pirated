@@ -2,7 +2,7 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { describe, expect, it, vi } from 'vitest'
 
-vi.mock('electron', () => ({ BrowserWindow: class {} }))
+vi.mock('electron', () => ({ BrowserWindow: class {}, ipcMain: { once: () => undefined } }))
 const { isTrustedUrl } = await import('../../src/main/window')
 const { ARGS } = await import('../../src/main/ipcSchemas')
 
@@ -41,5 +41,19 @@ describe('IPC argument schemas', () => {
     expect(() => ARGS.createCollection.parse([' '])).toThrow()
     expect(() => ARGS.createCollection.parse(['x'.repeat(201)])).toThrow()
     expect(() => ARGS.deleteNode.parse([])).toThrow()
+  })
+})
+
+describe('keyboard zoom', () => {
+  it('steps by half a level, resets with 0, and stays within 50%–300%', async () => {
+    const { nextZoom, ZOOM_MAX, ZOOM_MIN } = await import('../../src/main/window')
+    expect(nextZoom(0, '=')).toBe(0.5)
+    expect(nextZoom(0, '+')).toBe(0.5)
+    expect(nextZoom(0, 'NumpadAdd')).toBe(0.5)
+    expect(nextZoom(0.5, '-')).toBe(0)
+    expect(nextZoom(2, '0')).toBe(0)
+    expect(nextZoom(ZOOM_MAX, '=')).toBe(ZOOM_MAX)
+    expect(nextZoom(ZOOM_MIN, '-')).toBe(ZOOM_MIN)
+    expect(nextZoom(0, 'a')).toBeNull()
   })
 })
