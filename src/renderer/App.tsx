@@ -7,7 +7,7 @@ import { ResponseViewer } from './components/ResponseViewer'
 import { Sidebar } from './components/Sidebar'
 import { TabsBar } from './components/TabsBar'
 import { cleanError } from './lib/body'
-import { initialState, isDirty, reducer, type Tab } from './state'
+import { activeTab, initialState, isDirty, reducer, type Tab } from './state'
 
 let sendSeq = 0
 
@@ -42,24 +42,25 @@ export function App() {
 
   const openRequest = (id: string) =>
     run(async () => {
-      if (stateRef.current.tabs.some((t) => t.id === id)) return dispatch({ type: 'activate', id })
+      const open = stateRef.current.tabs.find((t) => t.id === id)
+      if (open) return dispatch({ type: 'activate', key: open.key })
       dispatch({ type: 'open', id, item: await window.api.readRequest(id) })
     })
 
   const save = (tab: Tab) =>
     run(async () => {
       const workspace = await window.api.saveRequest(tab.id, tab.item)
-      dispatch({ type: 'saved', id: tab.id, item: tab.item })
+      dispatch({ type: 'saved', key: tab.key, item: tab.item })
       dispatch({ type: 'workspace', workspace })
     })
 
   const send = (tab: Tab) => {
     const sendId = `${Date.now()}-${++sendSeq}`
-    dispatch({ type: 'sendStart', id: tab.id, sendId })
+    dispatch({ type: 'sendStart', key: tab.key, sendId })
     void window.api
       .sendRequest(sendId, tab.item)
       .catch((e) => ({ ok: false as const, error: cleanError(e) }))
-      .then((result) => dispatch({ type: 'sendDone', id: tab.id, sendId, result }))
+      .then((result) => dispatch({ type: 'sendDone', key: tab.key, sendId, result }))
   }
 
   const cancel = (tab: Tab) => {
@@ -68,15 +69,15 @@ export function App() {
 
   const close = (tab: Tab) => {
     if (isDirty(tab) && !window.confirm(`"${tab.item.name}" has unsaved changes. Close without saving?`)) return
-    dispatch({ type: 'close', id: tab.id })
+    dispatch({ type: 'close', key: tab.key })
   }
 
-  const active = state.tabs.find((t) => t.id === state.activeId)
+  const active = activeTab(state)
 
   // Ctrl/Cmd+S saves, Ctrl/Cmd+Enter sends — same shortcuts as Postman.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      const tab = stateRef.current.tabs.find((t) => t.id === stateRef.current.activeId)
+      const tab = activeTab(stateRef.current)
       if (!tab || !(e.ctrlKey || e.metaKey)) return
       if (e.key === 's') {
         e.preventDefault()
@@ -145,7 +146,7 @@ export function App() {
             <Allotment.Pane preferredSize={300} minSize={220} maxSize={600}>
               <Sidebar
                 workspace={state.workspace}
-                activeId={state.activeId}
+                activeId={active?.id ?? null}
                 renamingId={renamingId}
                 actions={sidebarActions}
               />
@@ -154,8 +155,8 @@ export function App() {
               <div className="workbench">
                 <TabsBar
                   tabs={state.tabs}
-                  activeId={state.activeId}
-                  onActivate={(id) => dispatch({ type: 'activate', id })}
+                  activeKey={state.activeKey}
+                  onActivate={(key) => dispatch({ type: 'activate', key })}
                   onClose={close}
                 />
                 {active ? (
@@ -163,7 +164,7 @@ export function App() {
                     <Allotment.Pane minSize={160}>
                       <RequestEditor
                         tab={active}
-                        onChange={(item: PmItem) => dispatch({ type: 'edit', id: active.id, item })}
+                        onChange={(item: PmItem) => dispatch({ type: 'edit', key: active.key, item })}
                         onSend={() => send(active)}
                         onCancel={() => cancel(active)}
                         onSave={() => void save(active)}

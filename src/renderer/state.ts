@@ -3,9 +3,10 @@ import { stableStringify } from '../shared/format/stableJson'
 import type { PmItem, WorkspaceInfo } from '../shared/format/types'
 
 export interface Tab {
-  id: string
-  /** Stable React key; unlike `id` it survives renames. */
+  /** Stable identity of the tab. Tab-level actions use it because `id` changes on rename. */
   key: string
+  /** Workspace node id (file path) of the request; changes when it or a parent is renamed. */
+  id: string
   item: PmItem
   /** Serialized item as last saved; the tab is dirty when the current item differs. */
   saved: string
@@ -16,41 +17,46 @@ export interface Tab {
 export interface State {
   workspace: WorkspaceInfo | null
   tabs: Tab[]
-  activeId: string | null
+  activeKey: string | null
   error: string | null
   nextKey: number
 }
 
-export const initialState: State = { workspace: null, tabs: [], activeId: null, error: null, nextKey: 1 }
+export const initialState: State = { workspace: null, tabs: [], activeKey: null, error: null, nextKey: 1 }
 
 export type Action =
   | { type: 'workspace'; workspace: WorkspaceInfo | null }
+  // Node-level actions (addressed by node id)
   | { type: 'open'; id: string; item: PmItem }
-  | { type: 'activate'; id: string }
-  | { type: 'close'; id: string }
-  | { type: 'edit'; id: string; item: PmItem }
-  | { type: 'saved'; id: string; item: PmItem }
   | { type: 'renamed'; id: string; newId: string; name: string }
   | { type: 'removed'; id: string }
-  | { type: 'sendStart'; id: string; sendId: string }
-  | { type: 'sendDone'; id: string; sendId: string; result: SendResult }
+  // Tab-level actions (addressed by tab key)
+  | { type: 'activate'; key: string }
+  | { type: 'close'; key: string }
+  | { type: 'edit'; key: string; item: PmItem }
+  | { type: 'saved'; key: string; item: PmItem }
+  | { type: 'sendStart'; key: string; sendId: string }
+  | { type: 'sendDone'; key: string; sendId: string; result: SendResult }
   | { type: 'error'; error: string | null }
 
 export const isDirty = (t: Tab) => stableStringify(t.item) !== t.saved
+export const activeTab = (s: State) => s.tabs.find((t) => t.key === s.activeKey)
 
-const mapTab = (s: State, id: string, f: (t: Tab) => Tab): State => ({
+const mapTab = (s: State, match: (t: Tab) => boolean, f: (t: Tab) => Tab): State => ({
   ...s,
-  tabs: s.tabs.map((t) => (t.id === id ? f(t) : t)),
+  tabs: s.tabs.map((t) => (match(t) ? f(t) : t)),
 })
 
-function closeTabs(s: State, gone: (id: string) => boolean): State {
-  const index = s.tabs.findIndex((t) => t.id === s.activeId)
-  const tabs = s.tabs.filter((t) => !gone(t.id))
-  if (s.activeId === null || !gone(s.activeId)) return { ...s, tabs }
+function closeTabs(s: State, gone: (t: Tab) => boolean): State {
+  const index = s.tabs.findIndex((t) => t.key === s.activeKey)
+  const tabs = s.tabs.filter((t) => !gone(t))
+  if (index === -1 || !gone(s.tabs[index])) return { ...s, tabs }
   // Activate the tab that slides into the closed tab's place, like Postman.
-  const survivorsBefore = s.tabs.slice(0, index).filter((t) => !gone(t.id)).length
-  return { ...s, tabs, activeId: tabs[Math.min(survivorsBefore, tabs.length - 1)]?.id ?? null }
+  const survivorsBefore = s.tabs.slice(0, index).filter((t) => !gone(t)).length
+  return { ...s, tabs, activeKey: tabs[Math.min(survivorsBefore, tabs.length - 1)]?.key ?? null }
 }
+
+const under = (id: string, node: string) => id === node || id.startsWith(`${node}/`)
 
 export function reducer(s: State, a: Action): State {
   switch (a.type) {
@@ -58,44 +64,53 @@ export function reducer(s: State, a: Action): State {
       return a.workspace && a.workspace.root === s.workspace?.root
         ? { ...s, workspace: a.workspace }
         : { ...initialState, workspace: a.workspace, nextKey: s.nextKey }
-    case 'open':
-      if (s.tabs.some((t) => t.id === a.id)) return { ...s, activeId: a.id }
+    case 'open': {
+      const existing = s.tabs.find((t) => t.id === a.id)
+      if (existing) return { ...s, activeKey: existing.key }
+      const key = `tab-${s.nextKey}`
       return {
         ...s,
-        tabs: [...s.tabs, { id: a.id, key: `tab-${s.nextKey}`, item: a.item, saved: stableStringify(a.item) }],
-        activeId: a.id,
+        tabs: [...s.tabs, { key, id: a.id, item: a.item, saved: stableStringify(a.item) }],
+        activeKey: key,
         nextKey: s.nextKey + 1,
       }
-    case 'activate':
-      return { ...s, activeId: a.id }
-    case 'close':
-      return closeTabs(s, (id) => id === a.id)
-    case 'removed':
-      return closeTabs(s, (id) => id === a.id || id.startsWith(`${a.id}/`))
-    case 'edit':
-      return mapTab(s, a.id, (t) => ({ ...t, item: a.item }))
-    case 'saved':
-      return mapTab(s, a.id, (t) => ({ ...t, saved: stableStringify(a.item) }))
-    case 'renamed': {
-      // The node's file/folder moved: re-key its tab and every tab below a renamed folder.
-      const moved = (id: string) =>
-        id === a.id ? a.newId : id.startsWith(`${a.id}/`) ? a.newId + id.slice(a.id.length) : id
-      const renamed = mapTab(s, a.id, (t) => ({
-        ...t,
-        item: { ...t.item, name: a.name },
-        saved: stableStringify({ ...JSON.parse(t.saved), name: a.name }),
-      }))
-      return {
-        ...renamed,
-        tabs: renamed.tabs.map((t) => ({ ...t, id: moved(t.id) })),
-        activeId: renamed.activeId && moved(renamed.activeId),
-      }
     }
+    case 'renamed': {
+      // The node's file/folder moved: update its tab and every tab below a renamed folder.
+      const renamed = mapTab(
+        s,
+        (t) => t.id === a.id,
+        (t) => ({
+          ...t,
+          item: { ...t.item, name: a.name },
+          saved: stableStringify({ ...JSON.parse(t.saved), name: a.name }),
+        }),
+      )
+      return mapTab(
+        renamed,
+        (t) => under(t.id, a.id),
+        (t) => ({ ...t, id: a.newId + t.id.slice(a.id.length) }),
+      )
+    }
+    case 'removed':
+      return closeTabs(s, (t) => under(t.id, a.id))
+    case 'activate':
+      return { ...s, activeKey: a.key }
+    case 'close':
+      return closeTabs(s, (t) => t.key === a.key)
+    case 'edit':
+      return mapTab(s, (t) => t.key === a.key, (t) => ({ ...t, item: a.item }))
+    case 'saved':
+      return mapTab(s, (t) => t.key === a.key, (t) => ({ ...t, saved: stableStringify(a.item) }))
     case 'sendStart':
-      return mapTab(s, a.id, (t) => ({ ...t, sendId: a.sendId }))
+      return mapTab(s, (t) => t.key === a.key, (t) => ({ ...t, sendId: a.sendId }))
     case 'sendDone':
       // Ignore results of a send that was superseded or cancelled.
-      return mapTab(s, a.id, (t) => (t.sendId === a.sendId ? { ...t, sendId: undefined, response: a.result } : t))
+      return mapTab(
+        s,
+        (t) => t.key === a.key && t.sendId === a.sendId,
+        (t) => ({ ...t, sendId: undefined, response: a.result }),
+      )
     case 'error':
       return { ...s, error: a.error }
   }

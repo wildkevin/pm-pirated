@@ -4,22 +4,22 @@ import { isDirty, type Tab } from '../state'
 
 interface Props {
   tabs: Tab[]
-  activeId: string | null
-  onActivate(id: string): void
+  activeKey: string | null
+  onActivate(key: string): void
   onClose(tab: Tab): void
 }
 
-export function TabsBar({ tabs, activeId, onActivate, onClose }: Props) {
+export function TabsBar({ tabs, activeKey, onActivate, onClose }: Props) {
   return (
     <div className="tabs" role="tablist">
       {tabs.map((tab) => (
         <div
           key={tab.key}
           role="tab"
-          aria-selected={tab.id === activeId}
-          className={`tab${tab.id === activeId ? ' active' : ''}`}
+          aria-selected={tab.key === activeKey}
+          className={`tab${tab.key === activeKey ? ' active' : ''}`}
           title={tab.item.name}
-          onClick={() => onActivate(tab.id)}
+          onClick={() => onActivate(tab.key)}
           onAuxClick={(e) => e.button === 1 && onClose(tab)}
         >
           <span className={methodClass(tab.item.request.method)}>{methodLabel(tab.item.request.method)}</span>

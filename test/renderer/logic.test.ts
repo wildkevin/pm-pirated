@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { MAX_RENDER_BYTES, cleanError, formatBytes, viewBody } from '../../src/renderer/lib/body'
-import { initialState, isDirty, reducer, type State } from '../../src/renderer/state'
+import { activeTab, initialState, isDirty, reducer, type State } from '../../src/renderer/state'
 import type { PmItem } from '../../src/shared/format/types'
 
 const item = (name: string): PmItem => ({ name, request: { method: 'GET', url: '', header: [] } })
@@ -9,56 +9,73 @@ const withTabs = (...ids: string[]): State =>
   ids.reduce((s, id) => reducer(s, { type: 'open', id, item: item(id) }), reducer(initialState, { type: 'workspace', workspace: ws('/w') }))
 
 describe('tab reducer', () => {
+  const keyOf = (s: State, id: string) => s.tabs.find((t) => t.id === id)!.key
+  const activeId = (s: State) => activeTab(s)?.id ?? null
+
   it('does not open the same request twice', () => {
     const s = reducer(withTabs('a', 'b'), { type: 'open', id: 'a', item: item('a') })
     expect(s.tabs.map((t) => t.id)).toEqual(['a', 'b'])
-    expect(s.activeId).toBe('a')
+    expect(activeId(s)).toBe('a')
   })
 
   it('activates the neighbour when closing the active tab', () => {
-    let s = reducer(withTabs('a', 'b', 'c'), { type: 'activate', id: 'b' })
-    s = reducer(s, { type: 'close', id: 'b' })
-    expect(s.activeId).toBe('c')
-    s = reducer(s, { type: 'close', id: 'c' })
-    expect(s.activeId).toBe('a')
-    s = reducer(s, { type: 'close', id: 'a' })
-    expect(s.activeId).toBeNull()
+    let s = withTabs('a', 'b', 'c')
+    s = reducer(s, { type: 'activate', key: keyOf(s, 'b') })
+    s = reducer(s, { type: 'close', key: keyOf(s, 'b') })
+    expect(activeId(s)).toBe('c')
+    s = reducer(s, { type: 'close', key: keyOf(s, 'c') })
+    expect(activeId(s)).toBe('a')
+    s = reducer(s, { type: 'close', key: keyOf(s, 'a') })
+    expect(s.activeKey).toBeNull()
   })
 
   it('tracks dirty state across edits and saves', () => {
     let s = withTabs('a')
+    const key = keyOf(s, 'a')
     expect(isDirty(s.tabs[0])).toBe(false)
     const edited = { ...item('a'), request: { ...item('a').request, url: 'http://x' } }
-    s = reducer(s, { type: 'edit', id: 'a', item: edited })
+    s = reducer(s, { type: 'edit', key, item: edited })
     expect(isDirty(s.tabs[0])).toBe(true)
-    s = reducer(s, { type: 'saved', id: 'a', item: edited })
+    s = reducer(s, { type: 'saved', key, item: edited })
     expect(isDirty(s.tabs[0])).toBe(false)
   })
 
-  it('renaming re-keys the tab and does not make a clean tab dirty', () => {
-    const s = reducer(withTabs('c/a'), { type: 'renamed', id: 'c/a', newId: 'c/b', name: 'New' })
-    const key = s.tabs[0].key
-    expect(s.tabs[0]).toMatchObject({ id: 'c/b', item: { name: 'New' } })
-    // A new request created at the old path must not reuse the renamed tab's key.
+  it('renaming updates the tab id, keeps its key, and does not make it dirty', () => {
+    const before = withTabs('c/a')
+    const s = reducer(before, { type: 'renamed', id: 'c/a', newId: 'c/b', name: 'New' })
+    expect(s.tabs[0]).toMatchObject({ id: 'c/b', key: before.tabs[0].key, item: { name: 'New' } })
+    expect(activeId(s)).toBe('c/b')
+    expect(isDirty(s.tabs[0])).toBe(false)
+    // A new request created at the old path gets its own tab.
     const s2 = reducer(s, { type: 'open', id: 'c/a', item: item('c/a') })
     expect(new Set(s2.tabs.map((t) => t.key)).size).toBe(2)
-    expect(s2.tabs[0].key).toBe(key)
-    expect(s.activeId).toBe('c/b')
-    expect(isDirty(s.tabs[0])).toBe(false)
   })
 
-  it('renaming a folder re-keys the tabs inside it', () => {
+  it('keeps edits and send results that arrive with the pre-rename key (CI race)', () => {
+    let s = withTabs('c/a')
+    const key = keyOf(s, 'c/a')
+    s = reducer(s, { type: 'sendStart', key, sendId: '1' })
+    s = reducer(s, { type: 'renamed', id: 'c/a', newId: 'c/b', name: 'B' })
+    const edited = { ...s.tabs[0].item, request: { ...s.tabs[0].item.request, method: 'POST' } }
+    s = reducer(s, { type: 'edit', key, item: edited })
+    s = reducer(s, { type: 'sendDone', key, sendId: '1', result: { ok: false, error: 'x' } })
+    expect(s.tabs[0]).toMatchObject({ id: 'c/b', item: { request: { method: 'POST' } }, response: { error: 'x' } })
+  })
+
+  it('renaming a folder updates the ids of tabs inside it only', () => {
     const s = reducer(withTabs('c/F/a', 'c/F2/b'), { type: 'renamed', id: 'c/F', newId: 'c/G', name: 'G' })
     expect(s.tabs.map((t) => t.id)).toEqual(['c/G/a', 'c/F2/b'])
     expect(s.tabs[0].item.name).toBe('c/F/a')
   })
 
   it('ignores results from a superseded send', () => {
-    let s = reducer(withTabs('a'), { type: 'sendStart', id: 'a', sendId: '1' })
-    s = reducer(s, { type: 'sendStart', id: 'a', sendId: '2' })
-    s = reducer(s, { type: 'sendDone', id: 'a', sendId: '1', result: { ok: false, error: 'old' } })
+    let s = withTabs('a')
+    const key = keyOf(s, 'a')
+    s = reducer(s, { type: 'sendStart', key, sendId: '1' })
+    s = reducer(s, { type: 'sendStart', key, sendId: '2' })
+    s = reducer(s, { type: 'sendDone', key, sendId: '1', result: { ok: false, error: 'old' } })
     expect(s.tabs[0].response).toBeUndefined()
-    s = reducer(s, { type: 'sendDone', id: 'a', sendId: '2', result: { ok: false, error: 'new' } })
+    s = reducer(s, { type: 'sendDone', key, sendId: '2', result: { ok: false, error: 'new' } })
     expect(s.tabs[0]).toMatchObject({ sendId: undefined, response: { error: 'new' } })
   })
 
@@ -68,7 +85,7 @@ describe('tab reducer', () => {
       id: 'collections/C/F',
     })
     expect(s.tabs.map((t) => t.id)).toEqual(['collections/C/F2/b'])
-    expect(s.activeId).toBe('collections/C/F2/b')
+    expect(activeId(s)).toBe('collections/C/F2/b')
   })
 
   it('clears tabs when switching workspace, keeps them on refresh', () => {
