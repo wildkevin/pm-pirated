@@ -5,3 +5,6 @@ test-results/
 playwright-report/
 .DS_Store
 docs/reference/private/
+
+/build/*
+!/build/icon.png
