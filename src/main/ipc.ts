@@ -2,13 +2,14 @@ import { BrowserWindow, dialog, ipcMain, net } from 'electron'
 import { randomUUID } from 'node:crypto'
 import { readFile, writeFile } from 'node:fs/promises'
 import { isAbsolute, join, relative, resolve } from 'node:path'
-import type { RunnerSpec, SendSpec } from '../shared/engine'
+import type { CapturedExchange, RunnerSpec, SendSpec } from '../shared/engine'
 import type { PmAuth } from '../shared/format/types'
 import { sanitizeName } from '../shared/format/names'
 import { stableStringify } from '../shared/format/stableJson'
 import { rawUrl } from '../shared/format/url'
 import { CHANNELS, RUNNER_EVENT, type Api, type ImportResult, type ResolvedVariable, type RunnerEvent, type RunRecord } from '../shared/ipc'
 import type { EngineClient } from './engineClient'
+import { exchangeToItem, type CaptureManager } from './captureManager'
 import { codeLanguages, generateCode } from './codegen'
 import { buildRoutes, createDefinition, deleteDefinition, readDefinitions, saveDefinition, type MockManager } from './mocks'
 import { ARGS } from './ipcSchemas'
@@ -30,6 +31,7 @@ export interface IpcDeps {
   secrets: SecretStore
   engine: EngineClient
   mocks: MockManager
+  capture: CaptureManager
   /** Rebuilds the extra-CA bundle from settings; returns its path (or undefined). */
   caBundle(): Promise<string | undefined>
 }
@@ -54,6 +56,7 @@ export function registerIpc(deps: IpcDeps): void {
     vars = new Variables(dir, deps.secrets)
     // Mocks belong to a workspace: stop the old ones, start this one's auto-start mocks.
     if (switched) void deps.mocks.stopAll().then(() => deps.mocks.autoStart(dir)).catch(() => undefined)
+    deps.capture.setWorkspace(dir)
   }
   /** Saved examples may have changed: running mocks serving that collection reload their routes. */
   const examplesChanged = (id: string) => void deps.mocks.refresh(ws(), store.collectionOf(id)).catch(() => undefined)
@@ -324,6 +327,30 @@ export function registerIpc(deps: IpcDeps): void {
       return saveJson(deps.win, `${sanitizeName(record.name)}.postman_test_run.json`, record)
     },
     codeLanguages: async () => codeLanguages(),
+    captureState: () => deps.capture.getState(),
+    async startCapture(port, decrypt) {
+      const bundle = await caFile
+      return deps.capture.start(port, decrypt, bundle ? await readFile(bundle, 'utf8') : undefined)
+    },
+    stopCapture: () => deps.capture.stop(),
+    setCaptureOptions: (filter, destination) => {
+      if (destination !== 'history' && destination !== 'none') store.resolveInside(ws(), destination)
+      return deps.capture.setOptions(filter, destination)
+    },
+    setSystemProxy: (on) => deps.capture.setSystemProxy(on),
+    trustCaptureCa: () => deps.capture.trust(),
+    untrustCaptureCa: () => deps.capture.untrust(),
+    async exportCaptureCa() {
+      const res = await dialog.showSaveDialog(deps.win, { title: 'Export CA certificate', defaultPath: 'PM Local Proxy CA.crt' })
+      if (res.canceled || !res.filePath) return false
+      await writeFile(res.filePath, await deps.capture.caCertificate())
+      return true
+    },
+    async saveCaptured(exchange, parentId) {
+      const item = exchangeToItem(exchange as CapturedExchange)
+      const id = await store.createRequest(ws(), parentId, item.name, item)
+      return { workspace: await reopen(), id }
+    },
     listMocks: () => deps.mocks.list(ws()),
     async createMock(def) {
       const id = await createDefinition(ws(), def)

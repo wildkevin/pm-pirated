@@ -308,3 +308,39 @@ test('mock server answers with a saved example', async () => {
   await expect(page.getByTestId('mock-log')).toContainText('Matched')
   await app.close()
 })
+
+test('capture proxy records traffic and saves it to History', async () => {
+  const net = await import('node:net')
+  const port = await new Promise<number>((r) => {
+    const s = net.createServer().listen(0, '127.0.0.1', () => {
+      const p = (s.address() as AddressInfo).port
+      s.close(() => r(p))
+    })
+  })
+  const app = await launch(await temp('pml-ud-'))
+  const page = await app.firstWindow()
+  await stubDialogs(app, await temp('pml-ws-'))
+  await openWorkspace(page)
+  await page.locator('.status-bar').getByRole('button', { name: /Capture/ }).click()
+  await page.getByLabel('Port').fill(String(port))
+  await page.getByRole('button', { name: 'Start proxy' }).click()
+  await expect(page.getByTestId('capture-status')).toHaveText(`Listening on 127.0.0.1:${port}`)
+
+  // A client configured to use the proxy (absolute-form HTTP request).
+  await new Promise<void>((resolve, reject) => {
+    const req = http.request({ host: '127.0.0.1', port, method: 'POST', path: `${base}/captured?x=1`, headers: { Host: new URL(base).host, 'Content-Type': 'application/json' } }, (res) => {
+      res.resume()
+      res.on('end', () => resolve())
+    })
+    req.on('error', reject)
+    req.end('{"hello":"proxy"}')
+  })
+  await expect(page.getByTestId('capture-list')).toContainText('/captured?x=1')
+  await page.getByRole('button', { name: 'History' }).click()
+  await expect(page.getByTestId('history-row').first()).toContainText('/captured?x=1')
+
+  await page.getByRole('tab', { name: /Capture/ }).click()
+  await page.getByRole('button', { name: 'Stop proxy' }).click()
+  await expect(page.getByTestId('capture-status')).toHaveText('Stopped')
+  await app.close()
+})

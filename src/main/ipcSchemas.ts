@@ -61,6 +61,8 @@ const settings = z.object({
   }),
 })
 
+const captureFilter = z.object({ includeHosts: z.array(z.string().max(500)).max(100), excludeHosts: z.array(z.string().max(500)).max(100), methods: z.array(z.string().max(16)).max(20) })
+
 const mockDef = z.object({
   name: name,
   target: id,
@@ -136,5 +138,17 @@ export const ARGS = {
   startMock: z.tuple([id]),
   stopMock: z.tuple([id]),
   mockRoutes: z.tuple([id]),
+  captureState: z.tuple([]),
+  startCapture: z.tuple([z.number().int().min(1).max(65535), z.boolean()]),
+  stopCapture: z.tuple([]),
+  setCaptureOptions: z.tuple([captureFilter, z.string().min(1).max(2000)]),
+  setSystemProxy: z.tuple([z.boolean()]),
+  trustCaptureCa: z.tuple([]),
+  untrustCaptureCa: z.tuple([]),
+  exportCaptureCa: z.tuple([]),
+  saveCaptured: z.tuple([
+    z.looseObject({ method: z.string().max(32), url: z.string().url().max(100_000), requestHeaders: z.array(z.object({ key: z.string(), value: z.string() })), requestBody: z.string().max(2_000_000) }),
+    id,
+  ]),
   generateCode: z.tuple([id.nullable(), pmItem, id.nullable(), z.string().max(40), z.string().max(40)]),
 } satisfies Record<keyof Api, z.ZodType>

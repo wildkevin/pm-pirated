@@ -13,6 +13,8 @@ export type TabDoc =
   | { kind: 'runner'; target: string }
   /** Mock server (id = mocks/<file>.mock.json). */
   | { kind: 'mock'; title: string }
+  /** Capture proxy (single tab, id 'capture'). */
+  | { kind: 'capture' }
 
 export interface Tab {
   /** Stable identity of the tab. Tab-level actions use it because `id` changes on rename. */
@@ -76,7 +78,7 @@ export type Action =
 export const isDirty = (t: Tab) => stableStringify(t.doc) !== t.saved
 export const activeTab = (s: State) => s.tabs.find((t) => t.key === s.activeKey)
 export const tabTitle = (t: Tab) =>
-  t.doc.kind === 'request' ? t.doc.item.name : t.doc.kind === 'container' ? t.doc.container.name : t.doc.kind === 'variables' || t.doc.kind === 'mock' ? t.doc.title : 'Runner'
+  t.doc.kind === 'request' ? t.doc.item.name : t.doc.kind === 'container' ? t.doc.container.name : t.doc.kind === 'variables' || t.doc.kind === 'mock' ? t.doc.title : t.doc.kind === 'capture' ? 'Capture' : 'Runner'
 
 const mapTab = (s: State, match: (t: Tab) => boolean, f: (t: Tab) => Tab): State => ({
   ...s,

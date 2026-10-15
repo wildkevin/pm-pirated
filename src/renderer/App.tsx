@@ -1,10 +1,11 @@
 import { Allotment } from 'allotment'
-import { Code2, FolderOpen, PlayCircle, Settings as SettingsIcon, Terminal } from 'lucide-react'
+import { Code2, FolderOpen, PlayCircle, Radio, Settings as SettingsIcon, Terminal } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import type { RunReport } from '../shared/engine'
 import type { PmAuth, PmItem, TreeNode } from '../shared/format/types'
 import { rawUrl } from '../shared/format/url'
-import type { HistoryEntry, ImportResult, OAuth2Config, ResolvedVariable } from '../shared/ipc'
+import type { CaptureState, HistoryEntry, ImportResult, OAuth2Config, ResolvedVariable } from '../shared/ipc'
+import type { CapturedExchange } from '../shared/engine'
 import type { MockInfo, MockLogEntry } from '../shared/mock'
 import type { AppSettingsData } from '../shared/settings'
 import { getAttr, setAttr } from './lib/auth'
@@ -18,7 +19,8 @@ import { RequestEditor } from './components/request/RequestEditor'
 import { ResponseViewer } from './components/response/ResponseViewer'
 import { CreateMockModal, MockView } from './components/MockView'
 import { RunnerView } from './components/RunnerView'
-import { onMockEvent } from './lib/runnerBus'
+import { onCaptureEvent, onMockEvent } from './lib/runnerBus'
+import { CaptureView } from './components/CaptureView'
 import { Sidebar, type Panel, type SidebarActions } from './components/Sidebar'
 import { TabsBar } from './components/TabsBar'
 import { VariablesEditor } from './components/VariablesEditor'
@@ -58,6 +60,8 @@ export function App() {
   const [codeOpen, setCodeOpen] = useState(false)
   const [mocks, setMocks] = useState<MockInfo[]>([])
   const [mockLogs, setMockLogs] = useState<Record<string, MockLogEntry[]>>({})
+  const [capture, setCapture] = useState<CaptureState | null>(null)
+  const [captured, setCaptured] = useState<CapturedExchange[]>([])
   const restoredRoot = useRef<string | null>(null)
 
   const fail = useCallback((e: unknown) => dispatch({ type: 'error', error: cleanError(e) }), [])
@@ -106,6 +110,18 @@ export function App() {
         if ('log' in e) setMockLogs((prev) => ({ ...prev, [e.id]: [...(prev[e.id] ?? []), e.log].slice(-200) }))
         else setMocks((prev) => prev.map((m) => (m.id === e.id ? { ...m, status: e.status } : m)))
       }),
+    [],
+  )
+
+  useEffect(
+    () =>
+      onCaptureEvent((e) => {
+        if ('state' in e) return setCapture(e.state)
+        setCaptured((prev) => [...prev, e.exchange].slice(-500))
+        if (e.savedTo === 'history') window.api.listHistory().then(setHistory, () => undefined)
+        else if (e.savedTo) void refreshWorkspace()
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
   )
 
@@ -412,6 +428,18 @@ export function App() {
       )
     }
     const doc = active.doc
+    if (doc.kind === 'capture') {
+      return (
+        <CaptureView
+          state={capture}
+          workspace={state.workspace!}
+          captured={captured}
+          onClear={() => setCaptured([])}
+          onOpenInTab={(item) => dispatch({ type: 'openDraft', item })}
+          onError={fail}
+        />
+      )
+    }
     if (doc.kind === 'mock') {
       return (
         <MockView
@@ -602,6 +630,18 @@ export function App() {
           onClick={() => state.workspace?.collections[0] && dispatch({ type: 'openRunner', target: active?.doc.kind === 'runner' ? active.doc.target : state.workspace.collections[0].id })}
         >
           <PlayCircle size={12} /> Runner
+        </button>
+        <button
+          className={`status-btn${capture?.running ? ' active' : ''}`}
+          disabled={!state.workspace}
+          onClick={() => {
+            void run(async () => setCapture(await window.api.captureState()))
+            const open = state.tabs.find((t) => t.doc.kind === 'capture')
+            if (open) dispatch({ type: 'activate', key: open.key })
+            else dispatch({ type: 'open', id: 'capture', doc: { kind: 'capture' } })
+          }}
+        >
+          <Radio size={12} /> {capture?.running ? `Capturing :${capture.port}` : 'Capture'}
         </button>
         <span className="spacer" />
         {state.workspace && <span className="muted">{state.workspace.root}</span>}

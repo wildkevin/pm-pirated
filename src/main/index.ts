@@ -1,7 +1,10 @@
 import { app, safeStorage, session, utilityProcess } from 'electron'
 import { join } from 'node:path'
 import { safeStorageCrypt } from './crypto'
-import { MOCK_EVENT } from '../shared/ipc'
+import { CAPTURE_EVENT, MOCK_EVENT } from '../shared/ipc'
+import type { FromProxy, ToProxy, UpstreamProxy } from '../shared/engine'
+import { sessionProxyConfig, upstreamFor } from './capture'
+import { CaptureManager, ProxyClient } from './captureManager'
 import type { FromMocks, ToMocks } from '../shared/mock'
 import { EngineClient, type ChildProcess, type EngineProcess } from './engineClient'
 import { MockClient, MockManager } from './mocks'
@@ -17,6 +20,16 @@ else app.setPath('userData', join(app.getPath('appData'), 'pm-local'))
 
 function forkMocks(): ChildProcess<ToMocks, FromMocks> {
   const child = utilityProcess.fork(join(__dirname, 'mocks.js'), [], { serviceName: 'PM Local Mock Servers' })
+  return {
+    postMessage: (m) => child.postMessage(m),
+    onMessage: (cb) => child.on('message', cb),
+    onExit: (cb) => child.on('exit', cb),
+    kill: () => void child.kill(),
+  }
+}
+
+function forkProxy(): ChildProcess<ToProxy, FromProxy> {
+  const child = utilityProcess.fork(join(__dirname, 'proxy.js'), [], { serviceName: 'PM Local Capture Proxy' })
   return {
     postMessage: (m) => child.postMessage(m),
     onMessage: (cb) => child.on('message', cb),
@@ -52,7 +65,41 @@ if (!app.requestSingleInstanceLock()) {
     const win = createMainWindow()
     const mockClient = new MockClient(forkMocks, (code) => console.error(`Mock server process exited with code ${code}`))
     const mocks = new MockManager(mockClient, (e) => !win.isDestroyed() && win.webContents.send(MOCK_EVENT, e))
-    registerIpc({ win, settings, secrets, engine, mocks, caBundle: () => writeCaBundle(join(userData, 'ca-bundle.pem'), settings.get()) })
+    // Upstream for captured traffic: the proxy Windows used before capture took over (incl. PAC).
+    let upstreamSession: { key: string; session: Electron.Session } | undefined
+    const resolverFor = async () => {
+      const previous = await capture.previousSystemSettings()
+      if (!previous) return session.defaultSession
+      const config = sessionProxyConfig(previous)
+      const key = JSON.stringify(config)
+      if (upstreamSession?.key !== key) {
+        const s = session.fromPartition('pmlocal-upstream')
+        await s.setProxy(config)
+        upstreamSession = { key, session: s }
+      }
+      return upstreamSession.session
+    }
+    const proxyClient: ProxyClient = new ProxyClient(
+      forkProxy,
+      async (url): Promise<UpstreamProxy | null> => {
+        const resolver = await resolverFor()
+        return upstreamFor(url, settings.get(), capture.port, (u) => resolver.resolveProxy(u))
+      },
+      (code) => console.error(`Capture proxy process exited with code ${code}`),
+    )
+    const capture: CaptureManager = new CaptureManager(proxyClient, join(userData, 'proxy'), crypt, (e) => !win.isDestroyed() && win.webContents.send(CAPTURE_EVENT, e))
+    void capture.init()
+    registerIpc({ win, settings, secrets, engine, mocks, capture, caBundle: () => writeCaBundle(join(userData, 'ca-bundle.pem'), settings.get()) })
+    // Windows proxy settings must be given back before the app exits.
+    let restored = false
+    app.on('will-quit', (e) => {
+      if (restored) return
+      e.preventDefault()
+      void capture.shutdown().finally(() => {
+        restored = true
+        app.quit()
+      })
+    })
     app.on('second-instance', () => {
       if (win.isMinimized()) win.restore()
       win.focus()

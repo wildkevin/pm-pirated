@@ -4,41 +4,14 @@ import https from 'node:https'
 import net from 'node:net'
 import tls from 'node:tls'
 import type { AddressInfo } from 'node:net'
+import type { CaptureFilter, CapturedExchange, UpstreamProxy } from '../shared/engine'
 import { LeafFactory, type Pem } from './certs'
 
 /** Bodies kept per captured exchange. */
 const MAX_CAPTURE = 1024 * 1024
 
-export interface Upstream {
-  host: string
-  port: number
-  /** "user:password" for Proxy-Authorization. */
-  auth?: string
-}
-
-export interface CapturedExchange {
-  id: number
-  ts: number
-  method: string
-  /** Full URL, or `https://host:port` for an undecrypted tunnel. */
-  url: string
-  tunnel: boolean
-  requestHeaders: { key: string; value: string }[]
-  requestBody: string
-  status?: number
-  responseHeaders: { key: string; value: string }[]
-  responseBody: string
-  bodyTruncated: boolean
-  timeMs: number
-  error?: string
-}
-
-export interface CaptureFilter {
-  /** Only record hosts matching one of these (substring, `*` wildcard); empty = all. */
-  includeHosts: string[]
-  excludeHosts: string[]
-  methods: string[]
-}
+export type Upstream = UpstreamProxy
+export type { CaptureFilter, CapturedExchange }
 
 export interface ProxyConfig {
   port: number

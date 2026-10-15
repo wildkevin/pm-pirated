@@ -195,3 +195,44 @@ export type FromEngine =
   | { type: 'proxy'; id: string; url: string }
   /** Streamed while a collection run is in progress. */
   | { type: 'runItem'; runId: string; item: RunnerItemResult }
+
+// --- Capture proxy ---
+
+export interface CaptureFilter {
+  includeHosts: string[]
+  excludeHosts: string[]
+  methods: string[]
+}
+
+export interface CapturedExchange {
+  id: number
+  ts: number
+  method: string
+  url: string
+  tunnel: boolean
+  requestHeaders: { key: string; value: string }[]
+  requestBody: string
+  status?: number
+  responseHeaders: { key: string; value: string }[]
+  responseBody: string
+  bodyTruncated: boolean
+  timeMs: number
+  error?: string
+}
+
+export interface UpstreamProxy {
+  host: string
+  port: number
+  auth?: string
+}
+
+export type ProxyMethods = {
+  start: { params: { port: number; decrypt: boolean; ca: { cert: string; key: string }; filter: CaptureFilter; extraCa?: string }; result: { port: number } }
+  stop: { params: Record<string, never>; result: void }
+  setFilter: { params: { filter: CaptureFilter }; result: void }
+}
+export type ToProxy = { type: 'call'; id: string; method: keyof ProxyMethods; params: unknown } | { type: 'upstreamReply'; id: string; upstream: UpstreamProxy | null }
+export type FromProxy =
+  | { type: 'reply'; id: string; result?: unknown; error?: string }
+  | { type: 'capture'; exchange: CapturedExchange }
+  | { type: 'upstream'; id: string; url: string }

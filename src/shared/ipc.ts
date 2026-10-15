@@ -1,5 +1,5 @@
 // The only surface the renderer can reach (exposed as window.api by the preload).
-import type { CookieInfo, RunReport, RunnerItemResult, RunnerSummary } from './engine'
+import type { CaptureFilter, CapturedExchange, CookieInfo, RunReport, RunnerItemResult, RunnerSummary } from './engine'
 import type { MockDefinition, MockEvent, MockInfo, MockRoute, MockStatus } from './mock'
 import type { PmContainer, PmItem, WorkspaceInfo } from './format/types'
 import type { AppSettingsData } from './settings'
@@ -166,6 +166,17 @@ export interface Api {
   stopMock(id: string): Promise<MockStatus>
   mockRoutes(id: string): Promise<MockRoute[]>
 
+  // capture proxy
+  captureState(): Promise<CaptureState>
+  startCapture(port: number, decrypt: boolean): Promise<CaptureState>
+  stopCapture(): Promise<CaptureState>
+  setCaptureOptions(filter: CaptureFilter, destination: string): Promise<CaptureState>
+  setSystemProxy(on: boolean): Promise<CaptureState>
+  trustCaptureCa(): Promise<CaptureState>
+  untrustCaptureCa(): Promise<CaptureState>
+  exportCaptureCa(): Promise<boolean>
+  saveCaptured(exchange: CapturedExchange, parentId: string): Promise<Created>
+
   // code snippets
   codeLanguages(): Promise<CodeLanguage[]>
   generateCode(requestId: string | null, item: PmItem, environmentId: string | null, language: string, variant: string): Promise<string>
@@ -182,10 +193,12 @@ export interface AppEvents {
   closeReady(): void
   onRunnerEvent(cb: (e: RunnerEvent) => void): void
   onMockEvent(cb: (e: MockEvent) => void): void
+  onCaptureEvent(cb: (e: CaptureEvent) => void): void
 }
 export const BEFORE_CLOSE = 'app:before-close'
 export const RUNNER_EVENT = 'runner:event'
 export const MOCK_EVENT = 'mocks:event'
+export const CAPTURE_EVENT = 'capture:event'
 export const CLOSE_READY = 'app:close-ready'
 
 export const CHANNELS = {
@@ -240,6 +253,15 @@ export const CHANNELS = {
   startMock: 'mocks:start',
   stopMock: 'mocks:stop',
   mockRoutes: 'mocks:routes',
+  captureState: 'capture:state',
+  startCapture: 'capture:start',
+  stopCapture: 'capture:stop',
+  setCaptureOptions: 'capture:options',
+  setSystemProxy: 'capture:systemProxy',
+  trustCaptureCa: 'capture:trust',
+  untrustCaptureCa: 'capture:untrust',
+  exportCaptureCa: 'capture:exportCa',
+  saveCaptured: 'capture:save',
   generateCode: 'code:generate',
 } as const satisfies Record<keyof Api, string>
 
@@ -291,3 +313,21 @@ export interface CodeLanguage {
   variants: string[]
   syntax: string
 }
+
+// --- Capture proxy ---
+
+export interface CaptureState {
+  running: boolean
+  port: number
+  decrypt: boolean
+  filter: import('./engine').CaptureFilter
+  /** 'history', 'none', or a collection/folder id to save captured requests into. */
+  destination: string
+  systemProxy: boolean
+  /** Only Windows can switch the system proxy from the app. */
+  systemProxySupported: boolean
+  caTrusted: boolean | null
+  error?: string
+}
+
+export type CaptureEvent = { exchange: import('./engine').CapturedExchange; savedTo?: string } | { state: CaptureState }
