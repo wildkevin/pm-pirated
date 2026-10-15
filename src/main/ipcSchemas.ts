@@ -36,6 +36,7 @@ const settings = z.object({
     sslVerification: z.boolean(),
     followRedirects: z.boolean(),
     sendPostmanToken: z.boolean(),
+    allowFilesOutsideWorkingDir: z.boolean(),
   }),
   proxy: z.object({
     useSystemProxy: z.boolean(),
@@ -83,6 +84,7 @@ export const ARGS = {
   saveUiState: z.tuple([uiState]),
   sendRequest: z.tuple([id, id.nullable(), pmItem, id.nullable()]),
   cancelRequest: z.tuple([id]),
+  resolveVariables: z.tuple([id.nullable(), id.nullable()]),
   listHistory: z.tuple([]),
   deleteHistory: z.tuple([id.optional()]),
   listCookies: z.tuple([]),

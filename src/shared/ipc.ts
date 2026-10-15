@@ -19,6 +19,14 @@ export interface VariableRow {
 /** 'globals' | 'env:<environments/X.env.json>' | 'col:<collections/X>' */
 export type ScopeRef = string
 
+/** A variable as the request would see it, after scope precedence (environment > collection > globals). */
+export interface ResolvedVariable {
+  key: string
+  value: string
+  scope: 'environment' | 'collection' | 'globals'
+  secret: boolean
+}
+
 export interface ImportResult {
   kind: 'collection' | 'environment' | 'globals' | 'request'
   id: string
@@ -88,6 +96,8 @@ export interface Api {
   // sending
   /** `requestId` null = unsaved draft (no collection context). */
   sendRequest(sendId: string, requestId: string | null, item: PmItem, environmentId: string | null): Promise<RunReport>
+  /** For `{{var}}` highlighting and the environment quick look. */
+  resolveVariables(requestId: string | null, environmentId: string | null): Promise<ResolvedVariable[]>
   cancelRequest(sendId: string): Promise<void>
 
   // history, cookies
@@ -135,6 +145,7 @@ export const CHANNELS = {
   saveUiState: 'ui:save',
   sendRequest: 'request:send',
   cancelRequest: 'request:cancel',
+  resolveVariables: 'variables:resolve',
   listHistory: 'history:list',
   deleteHistory: 'history:delete',
   listCookies: 'cookies:list',

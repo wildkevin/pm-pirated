@@ -56,6 +56,8 @@ const options: EngineOptions = {
   useSystemProxy: false,
   respectProxyEnv: false, // ignores this machine's http_proxy, like Postman's default
   clientCerts: [],
+  allowFilesOutsideWorkingDir: false,
+  allowedFiles: [],
 }
 
 const item = (url: string, extra: Partial<PmItem['request']> = {}, more: Partial<PmItem> = {}): PmItem => ({
@@ -147,6 +149,23 @@ describe('bodies', () => {
     expect(multipart.body).toContain('name="t"')
     const binary = echo(await send(item(`${base}/x`, { method: 'POST', body: { mode: 'file', file: { src: 'hello.txt' } } })))
     expect(binary.body).toBe('file-content')
+  })
+})
+
+describe('file access', () => {
+  it('refuses files outside the workspace unless allowed', async () => {
+    const outside = join(await mkdtemp(join(tmpdir(), 'pml-outside-')), 'id_rsa')
+    await writeFile(outside, 'PRIVATE-KEY')
+    const upload = (src: string) => item(`${base}/x`, { method: 'POST', body: { mode: 'formdata', formdata: [{ key: 'f', type: 'file', src, value: '' }] } })
+    const blocked = await send(upload(outside))
+    expect(JSON.stringify(blocked.report)).not.toContain('PRIVATE-KEY')
+    const viaDotDot = await send(item(`${base}/x`, { method: 'POST', body: { mode: 'file', file: { src: `../${outside.split('/').slice(-2).join('/')}` } } }))
+    expect(JSON.stringify(viaDotDot.report)).not.toContain('PRIVATE-KEY')
+
+    const allowed = await send(upload(outside), { options: { ...options, allowFilesOutsideWorkingDir: true } })
+    expect(echo(allowed).body).toContain('PRIVATE-KEY')
+    const listed = await send(upload(outside), { options: { ...options, allowedFiles: [outside] } })
+    expect(echo(listed).body).toContain('PRIVATE-KEY')
   })
 })
 

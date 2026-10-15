@@ -13,7 +13,7 @@ const tmp = () => mkdtemp(join(tmpdir(), 'pml-set-'))
 describe('AppSettings', () => {
   it('defaults match Postman: no timeout, 50 MB, SSL on, system proxy on, env proxies off', async () => {
     const s = new AppSettings(join(await tmp(), 's.json'), fakeCrypt).get()
-    expect(s.general).toEqual({ timeoutMs: 0, maxResponseSizeMb: 50, sslVerification: true, followRedirects: true, sendPostmanToken: true })
+    expect(s.general).toEqual({ timeoutMs: 0, maxResponseSizeMb: 50, sslVerification: true, followRedirects: true, sendPostmanToken: true, allowFilesOutsideWorkingDir: false })
     expect(s.proxy.useSystemProxy).toBe(true)
     expect(s.proxy.respectEnvVars).toBe(false)
   })

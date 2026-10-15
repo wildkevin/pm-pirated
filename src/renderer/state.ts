@@ -1,33 +1,52 @@
-import type { SendResult } from '../shared/engine'
+import type { RunReport } from '../shared/engine'
 import { stableStringify } from '../shared/format/stableJson'
-import type { PmItem, PmRequest, WorkspaceInfo } from '../shared/format/types'
+import type { PmContainer, PmItem, PmRequest, WorkspaceInfo } from '../shared/format/types'
+import type { UiState, VariableRow } from '../shared/ipc'
+
+export type TabDoc =
+  | { kind: 'request'; item: PmItem }
+  /** Collection or folder settings; `variables` only for collections. */
+  | { kind: 'container'; container: PmContainer; variables: VariableRow[] | null }
+  /** Environment or globals editor. */
+  | { kind: 'variables'; title: string; rows: VariableRow[] }
 
 export interface Tab {
   /** Stable identity of the tab. Tab-level actions use it because `id` changes on rename. */
   key: string
-  /** Workspace node id (file path) of the request; changes when it or a parent is renamed. */
-  id: string
-  item: PmItem
-  /** Serialized item as last saved; the tab is dirty when the current item differs. */
+  /** Request id / collection-or-folder id / variable scope; null for an unsaved draft request. */
+  id: string | null
+  doc: TabDoc
+  /** Serialized doc as last saved (or as opened, for drafts). Dirty when the doc differs. */
   saved: string
   sendId?: string
-  response?: SendResult
+  report?: RunReport
 }
 
 export interface State {
   workspace: WorkspaceInfo | null
   tabs: Tab[]
   activeKey: string | null
+  activeEnvironment: string | null
   error: string | null
   nextKey: number
 }
 
-export const initialState: State = { workspace: null, tabs: [], activeKey: null, error: null, nextKey: 1 }
+export const initialState: State = {
+  workspace: null,
+  tabs: [],
+  activeKey: null,
+  activeEnvironment: null,
+  error: null,
+  nextKey: 1,
+}
 
 export type Action =
   | { type: 'workspace'; workspace: WorkspaceInfo | null }
-  // Node-level actions (addressed by node id)
-  | { type: 'open'; id: string; item: PmItem }
+  | { type: 'restore'; ui: UiState }
+  | { type: 'environment'; id: string | null }
+  // Node-level actions (addressed by id)
+  | { type: 'open'; id: string; doc: TabDoc }
+  | { type: 'openDraft'; item: PmItem }
   | { type: 'renamed'; id: string; newId: string; name: string }
   | { type: 'removed'; id: string }
   // Tab-level actions (addressed by tab key)
@@ -35,13 +54,18 @@ export type Action =
   | { type: 'close'; key: string }
   /** A patch, not a full item: a stale render must not overwrite fields changed meanwhile (e.g. the name). */
   | { type: 'edit'; key: string; patch: Partial<PmRequest> }
-  | { type: 'saved'; key: string; item: PmItem }
+  | { type: 'editItem'; key: string; patch: Partial<Omit<PmItem, 'request' | 'name'>> }
+  | { type: 'setDoc'; key: string; doc: TabDoc }
+  /** After saving; `id` is set when a draft was saved into a collection. */
+  | { type: 'saved'; key: string; doc: TabDoc; id?: string }
   | { type: 'sendStart'; key: string; sendId: string }
-  | { type: 'sendDone'; key: string; sendId: string; result: SendResult }
+  | { type: 'sendDone'; key: string; sendId: string; report: RunReport }
   | { type: 'error'; error: string | null }
 
-export const isDirty = (t: Tab) => stableStringify(t.item) !== t.saved
+export const isDirty = (t: Tab) => stableStringify(t.doc) !== t.saved
 export const activeTab = (s: State) => s.tabs.find((t) => t.key === s.activeKey)
+export const tabTitle = (t: Tab) =>
+  t.doc.kind === 'request' ? t.doc.item.name : t.doc.kind === 'container' ? t.doc.container.name : t.doc.title
 
 const mapTab = (s: State, match: (t: Tab) => boolean, f: (t: Tab) => Tab): State => ({
   ...s,
@@ -57,7 +81,19 @@ function closeTabs(s: State, gone: (t: Tab) => boolean): State {
   return { ...s, tabs, activeKey: tabs[Math.min(survivorsBefore, tabs.length - 1)]?.key ?? null }
 }
 
-const under = (id: string, node: string) => id === node || id.startsWith(`${node}/`)
+/** True for a node id at or below `node` (paths), or the collection's variable scope. */
+const under = (id: string | null, node: string) => id !== null && (id === node || id.startsWith(`${node}/`) || id === `col:${node}`)
+
+function addTab(s: State, id: string | null, doc: TabDoc, saved = stableStringify(doc)): State {
+  const key = `tab-${s.nextKey}`
+  return { ...s, tabs: [...s.tabs, { key, id, doc, saved }], activeKey: key, nextKey: s.nextKey + 1 }
+}
+
+function rename(doc: TabDoc, name: string): TabDoc {
+  if (doc.kind === 'request') return { ...doc, item: { ...doc.item, name } }
+  if (doc.kind === 'container') return { ...doc, container: { ...doc.container, name } }
+  return { ...doc, title: name }
+}
 
 export function reducer(s: State, a: Action): State {
   switch (a.type) {
@@ -65,32 +101,34 @@ export function reducer(s: State, a: Action): State {
       return a.workspace && a.workspace.root === s.workspace?.root
         ? { ...s, workspace: a.workspace }
         : { ...initialState, workspace: a.workspace, nextKey: s.nextKey }
-    case 'open': {
-      const existing = s.tabs.find((t) => t.id === a.id)
-      if (existing) return { ...s, activeKey: existing.key }
-      const key = `tab-${s.nextKey}`
-      return {
-        ...s,
-        tabs: [...s.tabs, { key, id: a.id, item: a.item, saved: stableStringify(a.item) }],
-        activeKey: key,
-        nextKey: s.nextKey + 1,
-      }
+    case 'restore': {
+      let next: State = { ...s, tabs: [], activeKey: null, activeEnvironment: a.ui.activeEnvironment }
+      for (const t of a.ui.tabs) next = addTab(next, t.id, { kind: 'request', item: t.item }, t.saved ?? stableStringify({ kind: 'request', item: t.item }))
+      const active = next.tabs[a.ui.activeIndex] ?? next.tabs.at(-1)
+      return { ...next, activeKey: active?.key ?? null }
     }
+    case 'environment':
+      return { ...s, activeEnvironment: a.id }
+    case 'open': {
+      const existing = s.tabs.find((t) => t.id === a.id && t.doc.kind === a.doc.kind)
+      return existing ? { ...s, activeKey: existing.key } : addTab(s, a.id, a.doc)
+    }
+    case 'openDraft':
+      return addTab(s, null, { kind: 'request', item: a.item })
     case 'renamed': {
-      // The node's file/folder moved: update its tab and every tab below a renamed folder.
-      const renamed = mapTab(
+      // The node's file/folder (or environment file) moved: update its tab and everything below it.
+      const moved = mapTab(
         s,
-        (t) => t.id === a.id,
-        (t) => ({
-          ...t,
-          item: { ...t.item, name: a.name },
-          saved: stableStringify({ ...JSON.parse(t.saved), name: a.name }),
-        }),
+        (t) => t.id === a.id || (t.doc.kind === 'variables' && t.id === `col:${a.id}`),
+        (t) => {
+          const doc = rename(t.doc, a.name)
+          return { ...t, doc, saved: stableStringify(rename(JSON.parse(t.saved), a.name)) }
+        },
       )
       return mapTab(
-        renamed,
+        moved,
         (t) => under(t.id, a.id),
-        (t) => ({ ...t, id: a.newId + t.id.slice(a.id.length) }),
+        (t) => ({ ...t, id: t.id!.startsWith('col:') ? `col:${a.newId}` : a.newId + t.id!.slice(a.id.length) }),
       )
     }
     case 'removed':
@@ -100,9 +138,31 @@ export function reducer(s: State, a: Action): State {
     case 'close':
       return closeTabs(s, (t) => t.key === a.key)
     case 'edit':
-      return mapTab(s, (t) => t.key === a.key, (t) => ({ ...t, item: { ...t.item, request: { ...t.item.request, ...a.patch } } }))
+      return mapTab(
+        s,
+        (t) => t.key === a.key && t.doc.kind === 'request',
+        (t) => {
+          const doc = t.doc as Extract<TabDoc, { kind: 'request' }>
+          return { ...t, doc: { ...doc, item: { ...doc.item, request: { ...doc.item.request, ...a.patch } } } }
+        },
+      )
+    case 'editItem':
+      return mapTab(
+        s,
+        (t) => t.key === a.key && t.doc.kind === 'request',
+        (t) => {
+          const doc = t.doc as Extract<TabDoc, { kind: 'request' }>
+          return { ...t, doc: { ...doc, item: { ...doc.item, ...a.patch } } }
+        },
+      )
+    case 'setDoc':
+      return mapTab(s, (t) => t.key === a.key, (t) => ({ ...t, doc: a.doc }))
     case 'saved':
-      return mapTab(s, (t) => t.key === a.key, (t) => ({ ...t, saved: stableStringify(a.item) }))
+      return mapTab(
+        s,
+        (t) => t.key === a.key,
+        (t) => ({ ...t, saved: stableStringify(a.doc), ...(a.id !== undefined ? { id: a.id, doc: a.doc } : {}) }),
+      )
     case 'sendStart':
       return mapTab(s, (t) => t.key === a.key, (t) => ({ ...t, sendId: a.sendId }))
     case 'sendDone':
@@ -110,9 +170,23 @@ export function reducer(s: State, a: Action): State {
       return mapTab(
         s,
         (t) => t.key === a.key && t.sendId === a.sendId,
-        (t) => ({ ...t, sendId: undefined, response: a.result }),
+        (t) => ({ ...t, sendId: undefined, report: a.report }),
       )
     case 'error':
       return { ...s, error: a.error }
   }
+}
+
+/** What survives an app restart: request tabs (with unsaved edits) and the selected environment. */
+export function toUiState(s: State): UiState {
+  const requestTabs = s.tabs.filter((t) => t.doc.kind === 'request')
+  return {
+    activeEnvironment: s.activeEnvironment,
+    tabs: requestTabs.map((t) => ({ id: t.id, item: (t.doc as Extract<TabDoc, { kind: 'request' }>).item, saved: t.saved })),
+    activeIndex: requestTabs.findIndex((t) => t.key === s.activeKey),
+  }
+}
+
+export function newDraft(): PmItem {
+  return { name: 'Untitled Request', request: { method: 'GET', url: '', header: [] }, response: [] }
 }

@@ -11,6 +11,8 @@ export interface AppSettingsData {
     sslVerification: boolean
     followRedirects: boolean
     sendPostmanToken: boolean
+    /** Off by default: a shared collection must not be able to upload e.g. ~/.ssh/id_rsa. */
+    allowFilesOutsideWorkingDir: boolean
   }
   proxy: {
     useSystemProxy: boolean
@@ -38,7 +40,7 @@ export interface AppSettingsData {
 
 export const DEFAULT_SETTINGS: AppSettingsData = {
   recentWorkspaces: [],
-  general: { timeoutMs: 0, maxResponseSizeMb: 50, sslVerification: true, followRedirects: true, sendPostmanToken: true },
+  general: { timeoutMs: 0, maxResponseSizeMb: 50, sslVerification: true, followRedirects: true, sendPostmanToken: true, allowFilesOutsideWorkingDir: false },
   proxy: {
     useSystemProxy: true,
     respectEnvVars: false,

@@ -6,7 +6,7 @@ import type { SendSpec } from '../shared/engine'
 import { sanitizeName } from '../shared/format/names'
 import { stableStringify } from '../shared/format/stableJson'
 import { rawUrl } from '../shared/format/url'
-import { CHANNELS, type Api, type ImportResult } from '../shared/ipc'
+import { CHANNELS, type Api, type ImportResult, type ResolvedVariable } from '../shared/ipc'
 import type { EngineClient } from './engineClient'
 import { ARGS } from './ipcSchemas'
 import { engineOptions } from './netconfig'
@@ -27,6 +27,8 @@ export interface IpcDeps {
   /** Rebuilds the extra-CA bundle from settings; returns its path (or undefined). */
   caBundle(): Promise<string | undefined>
 }
+
+const isCollectionId = (id: string) => id.split('/').length === 2
 
 export function registerIpc(deps: IpcDeps): void {
   const loc = rendererLocation()
@@ -78,12 +80,12 @@ export function registerIpc(deps: IpcDeps): void {
     },
     async renameNode(id, name) {
       const newId = await store.renameNode(ws(), id, name)
+      if (isCollectionId(id)) await variables().move(`col:${id}`, `col:${newId}`)
       return { workspace: await reopen(), id: newId }
     },
     async deleteNode(id) {
-      const scopeId = id.split('/').length === 2 ? await variables().scopeId(`col:${id}`) : undefined
       await store.deleteNode(ws(), id)
-      if (scopeId) await variables().forget(scopeId)
+      if (isCollectionId(id)) await variables().forget(`col:${id}`)
       return reopen()
     },
     readRequest: (id) => store.readRequest(ws(), id),
@@ -104,7 +106,7 @@ export function registerIpc(deps: IpcDeps): void {
       return { workspace: await reopen(), id }
     },
     async renameEnvironment(id, name) {
-      const newId = await renameEnvironment(ws(), id, name)
+      const newId = await renameEnvironment(ws(), id, name, variables())
       return { workspace: await reopen(), id: newId }
     },
     async deleteEnvironment(id) {
@@ -148,6 +150,17 @@ export function registerIpc(deps: IpcDeps): void {
         ...(res.ok ? { code: res.code, status: res.status, timeMs: res.timeMs } : { error: res.error }),
       }).catch(() => undefined)
       return report
+    },
+    async resolveVariables(requestId, environmentId) {
+      const v = variables()
+      const scopes: [ResolvedVariable['scope'], string][] = [['globals', 'globals']]
+      if (requestId) scopes.push(['collection', `col:${store.collectionOf(requestId)}`])
+      if (environmentId) scopes.push(['environment', `env:${environmentId}`])
+      const out = new Map<string, ResolvedVariable>()
+      for (const [scope, ref] of scopes)
+        for (const r of await v.effective(ref).catch(() => []))
+          out.set(r.key, { key: r.key, value: r.value, scope, secret: r.type === 'secret' })
+      return [...out.values()]
     },
     async cancelRequest(sendId) {
       await deps.engine.call('cancel', { sendId })

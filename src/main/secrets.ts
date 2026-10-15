@@ -42,6 +42,17 @@ export class SecretStore {
     await writeFileAtomic(this.file, stableStringify(this.data))
   }
 
+  /** Re-keys every secret under `from` to `to` (scope renamed). Values stay encrypted as they are. */
+  async renamePrefix(from: string, to: string): Promise<void> {
+    const moving = Object.keys(this.data).filter((k) => k.startsWith(from))
+    if (!moving.length) return
+    for (const k of moving) {
+      this.data[to + k.slice(from.length)] = this.data[k]
+      delete this.data[k]
+    }
+    await this.setMany({})
+  }
+
   /** Drops every secret whose key starts with `prefix` (scope deleted). */
   async deletePrefix(prefix: string): Promise<void> {
     const gone = Object.keys(this.data).filter((k) => k.startsWith(prefix))

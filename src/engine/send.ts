@@ -1,7 +1,7 @@
 import runtime from 'postman-runtime'
 import { CertificateList, Collection, ProxyConfig, ProxyConfigList, Url, VariableScope } from 'postman-collection'
 import * as fs from 'node:fs'
-import { isAbsolute, resolve } from 'node:path'
+import { isAbsolute, relative, resolve } from 'node:path'
 import { inspect } from 'node:util'
 import { rawUrl } from '../shared/format/url'
 import type { PmContainer, PmItem, PmUrl, PmVariable } from '../shared/format/types'
@@ -68,16 +68,48 @@ function formatArg(a: unknown): string {
   return typeof a === 'string' ? a : inspect(a, { depth: 6, breakLength: 120 })
 }
 
-/** fs whose path arguments are resolved against the workspace, for form-data/binary file bodies. */
-function fileResolver(workingDir: string): unknown {
+/**
+ * fs for form-data/binary/certificate files: relative paths resolve against the workspace. Like
+ * Postman, files outside it are refused unless the user allowed that in Settings (a shared
+ * collection must not be able to upload ~/.ssh/id_rsa) or configured that exact file themselves.
+ */
+export function fileResolver(workingDir: string, o: Pick<EngineOptions, 'allowFilesOutsideWorkingDir' | 'allowedFiles'>): unknown {
+  const root = realOrSelf(workingDir)
+  const allowed = new Set(o.allowedFiles.map((f) => resolve(f)))
+  const check = (p: string): string => {
+    const abs = resolve(workingDir, p)
+    if (o.allowFilesOutsideWorkingDir || allowed.has(abs)) return abs
+    const rel = relative(root, realOrSelf(abs))
+    if (rel.startsWith('..') || isAbsolute(rel))
+      throw new Error(`Reading ${p} is blocked: it is outside the workspace folder (Settings > General > Allow reading files outside working directory)`)
+    return abs
+  }
   return new Proxy(fs, {
     get(target, prop) {
       const value = (target as unknown as Record<string | symbol, unknown>)[prop]
       if (typeof value !== 'function') return value
-      return (p: unknown, ...rest: unknown[]) =>
-        (value as (...a: unknown[]) => unknown).call(target, typeof p === 'string' && !isAbsolute(p) ? resolve(workingDir, p) : p, ...rest)
+      return (p: unknown, ...rest: unknown[]) => {
+        if (typeof p !== 'string') return (value as (...a: unknown[]) => unknown).call(target, p, ...rest)
+        let abs: string
+        try {
+          abs = check(p)
+        } catch (e) {
+          const cb = rest.at(-1)
+          if (typeof cb === 'function') return void cb(e)
+          throw e
+        }
+        return (value as (...a: unknown[]) => unknown).call(target, abs, ...rest)
+      }
     },
   })
+}
+
+function realOrSelf(p: string): string {
+  try {
+    return fs.realpathSync(p)
+  } catch {
+    return p
+  }
 }
 
 function proxyList(o: EngineOptions): unknown {
@@ -176,7 +208,7 @@ export function startSend(spec: SendSpec, deps: SendDeps = {}): SendHandle {
     environment,
     globals,
     timeout: { request: o.timeoutMs },
-    fileResolver: fileResolver(spec.workingDir),
+    fileResolver: fileResolver(spec.workingDir, o),
     ignoreProxyEnvironmentVariables: !o.respectProxyEnv,
     proxies: proxyList(o),
     certificates: certificateList(o),

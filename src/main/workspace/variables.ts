@@ -2,9 +2,12 @@
 // - initial values live in the workspace files (shareable, git),
 // - current values live in .pmlocal/current-values.json (local only),
 // - values of 'secret' variables never touch the workspace: both live encrypted in the SecretStore.
+// Local values are keyed by the scope's path in the workspace (never by ids found inside files,
+// which a shared file could forge), and are moved explicitly when an environment/collection is renamed.
 import { randomUUID } from 'node:crypto'
+import { lstatSync } from 'node:fs'
 import { mkdir, readdir, readFile, rename, rm } from 'node:fs/promises'
-import { basename, join } from 'node:path'
+import { basename, dirname, join, resolve } from 'node:path'
 import { sanitizeName, uniqueName } from '../../shared/format/names'
 import { stableStringify } from '../../shared/format/stableJson'
 import type { EnvironmentInfo, PmVariable } from '../../shared/format/types'
@@ -22,14 +25,30 @@ async function readJsonFile<T>(file: string): Promise<T> {
   return JSON.parse((await readFile(file, 'utf8')).replace(/^\uFEFF/, '')) as T
 }
 
+/** `environments/<name>.env.json` → absolute path, refusing anything else (separators, `..`, symlinks). */
+export function resolveEnvPath(root: string, id: string): string {
+  const parts = id.split('/')
+  const name = parts[1] ?? ''
+  if (parts.length !== 2 || parts[0] !== 'environments' || !name.endsWith(ENV_EXT) || name.startsWith('.') || /[\\:]/.test(name))
+    throw new WorkspaceError(`Not an environment: ${id}`)
+  const dir = resolve(root, 'environments')
+  const abs = resolve(dir, name)
+  if (dirname(abs) !== dir) throw new WorkspaceError(`Not an environment: ${id}`)
+  for (const p of [dir, abs]) {
+    try {
+      if (lstatSync(p).isSymbolicLink()) throw new WorkspaceError(`Symbolic links are not allowed in a workspace: ${id}`)
+    } catch (e) {
+      if (e instanceof WorkspaceError) throw e
+    }
+  }
+  return abs
+}
+
 interface ScopeFile {
   file: string
   /** Variables array as stored in the file. */
   vars(doc: Record<string, any>): PmVariable[]
   setVars(doc: Record<string, any>, vars: PmVariable[]): void
-  /** Stable id used for current values and secrets; created on first write if missing. */
-  id(doc: Record<string, any>): string | undefined
-  setId(doc: Record<string, any>, id: string): void
   /** Collections use `disabled`, environments/globals use `enabled`. */
   flag: 'enabled' | 'disabled'
   empty(): Record<string, any>
@@ -41,8 +60,6 @@ function scopeFile(root: string, scope: ScopeRef): ScopeFile {
       file: join(root, 'globals.json'),
       vars: (d) => d.values ?? [],
       setVars: (d, v) => (d.values = v),
-      id: () => 'globals',
-      setId: () => undefined,
       flag: 'enabled',
       empty: () => ({ name: 'Globals', values: [], _postman_variable_scope: 'globals' }),
     }
@@ -52,32 +69,22 @@ function scopeFile(root: string, scope: ScopeRef): ScopeFile {
       file,
       vars: (d) => d.values ?? [],
       setVars: (d, v) => (d.values = v),
-      id: (d) => d.id,
-      setId: (d, id) => (d.id = id),
       flag: 'enabled',
-      empty: () => ({ name: basename(file, ENV_EXT), values: [], _postman_variable_scope: 'environment' }),
+      empty: () => ({ id: randomUUID(), name: basename(file, ENV_EXT), values: [], _postman_variable_scope: 'environment' }),
     }
   }
   if (scope.startsWith('col:')) {
     const dir = resolveInside(root, scope.slice(4))
+    if (dirname(scope.slice(4)) !== 'collections') throw new WorkspaceError(`Not a collection: ${scope}`)
     return {
       file: join(dir, 'collection.json'),
       vars: (d) => d.variable ?? [],
       setVars: (d, v) => (d.variable = v),
-      id: (d) => d.info?._postman_id,
-      setId: (d, id) => (d.info = { ...d.info, _postman_id: id }),
       flag: 'disabled',
       empty: () => ({ info: { name: basename(dir) } }),
     }
   }
   throw new WorkspaceError(`Unknown variable scope: ${scope}`)
-}
-
-export function resolveEnvPath(root: string, id: string): string {
-  const parts = id.split('/')
-  if (parts.length !== 2 || parts[0] !== 'environments' || !parts[1].endsWith(ENV_EXT) || parts[1].startsWith('.'))
-    throw new WorkspaceError(`Not an environment: ${id}`)
-  return join(root, 'environments', parts[1])
 }
 
 const isEnabled = (v: PmVariable, flag: 'enabled' | 'disabled') => (flag === 'enabled' ? v.enabled !== false : !v.disabled)
@@ -89,7 +96,9 @@ export class Variables {
   ) {}
 
   private currentFile = () => join(this.root, '.pmlocal', 'current-values.json')
-  private secretKey = (scopeId: string, key: string, which: 'initial' | 'current') => `${this.root}::${scopeId}::${key}::${which}`
+  private secretPrefix = (scope: ScopeRef) => `${this.root}::${scope}::`
+  private secretKey = (scope: ScopeRef, key: string, which: 'initial' | 'current') =>
+    `${this.secretPrefix(scope)}${encodeURIComponent(key)}::${which}`
 
   private async readCurrent(): Promise<Record<string, Record<string, string>>> {
     try {
@@ -111,12 +120,11 @@ export class Variables {
   async read(scope: ScopeRef): Promise<VariableRow[]> {
     const sf = scopeFile(this.root, scope)
     const doc = await this.readDoc(sf)
-    const id = sf.id(doc)
-    const current = id ? ((await this.readCurrent())[id] ?? {}) : {}
+    const current = (await this.readCurrent())[scope] ?? {}
     return sf.vars(doc).map((v): VariableRow => {
       const secret = v.type === 'secret'
-      const initial = secret && id ? (this.secrets.get(this.secretKey(id, v.key, 'initial')) ?? '') : String(v.value ?? '')
-      const cur = secret && id ? this.secrets.get(this.secretKey(id, v.key, 'current')) : current[v.key]
+      const initial = secret ? (this.secrets.get(this.secretKey(scope, v.key, 'initial')) ?? '') : String(v.value ?? '')
+      const cur = secret ? this.secrets.get(this.secretKey(scope, v.key, 'current')) : current[v.key]
       return { key: v.key, type: secret ? 'secret' : 'default', initial, current: cur ?? initial, enabled: isEnabled(v, sf.flag) }
     })
   }
@@ -125,8 +133,6 @@ export class Variables {
     const sf = scopeFile(this.root, scope)
     const doc = await this.readDoc(sf)
     const previous = sf.vars(doc)
-    let id = sf.id(doc)
-    if (!id) sf.setId(doc, (id = randomUUID()))
 
     const seen = new Set<string>()
     const unique = rows.filter((r) => r.key && !seen.has(r.key) && seen.add(r.key))
@@ -143,15 +149,15 @@ export class Variables {
     await writeFileAtomic(sf.file, stableStringify(doc))
 
     const all = await this.readCurrent()
-    all[id] = Object.fromEntries(unique.filter((r) => r.type !== 'secret' && r.current !== r.initial).map((r) => [r.key, r.current]))
-    if (Object.keys(all[id]).length === 0) delete all[id]
+    all[scope] = Object.fromEntries(unique.filter((r) => r.type !== 'secret' && r.current !== r.initial).map((r) => [r.key, r.current]))
+    if (Object.keys(all[scope]).length === 0) delete all[scope]
     await writeFileAtomic(this.currentFile(), stableStringify(all))
 
     const secretEntries: Record<string, string | undefined> = {}
-    for (const p of previous) secretEntries[this.secretKey(id, p.key, 'initial')] = secretEntries[this.secretKey(id, p.key, 'current')] = undefined
+    for (const p of previous) secretEntries[this.secretKey(scope, p.key, 'initial')] = secretEntries[this.secretKey(scope, p.key, 'current')] = undefined
     for (const r of unique.filter((r) => r.type === 'secret')) {
-      secretEntries[this.secretKey(id, r.key, 'initial')] = r.initial
-      secretEntries[this.secretKey(id, r.key, 'current')] = r.current
+      secretEntries[this.secretKey(scope, r.key, 'initial')] = r.initial
+      secretEntries[this.secretKey(scope, r.key, 'current')] = r.current
     }
     await this.secrets.setMany(secretEntries)
   }
@@ -186,23 +192,26 @@ export class Variables {
     if (changed) await this.write(scope, next)
   }
 
-  /** Forget local current values and secrets of a deleted scope. */
-  async forget(scopeId: string): Promise<void> {
+  /** The scope's file was renamed/moved: carry its local current values and secrets along. */
+  async move(from: ScopeRef, to: ScopeRef): Promise<void> {
+    if (from === to) return
     const all = await this.readCurrent()
-    if (all[scopeId]) {
-      delete all[scopeId]
+    if (all[from]) {
+      all[to] = all[from]
+      delete all[from]
       await writeFileAtomic(this.currentFile(), stableStringify(all))
     }
-    await this.secrets.deletePrefix(`${this.root}::${scopeId}::`)
+    await this.secrets.renamePrefix(this.secretPrefix(from), this.secretPrefix(to))
   }
 
-  async scopeId(scope: ScopeRef): Promise<string | undefined> {
-    const sf = scopeFile(this.root, scope)
-    try {
-      return sf.id(await readJsonFile(sf.file))
-    } catch {
-      return undefined
+  /** Forget local current values and secrets of a deleted scope. */
+  async forget(scope: ScopeRef): Promise<void> {
+    const all = await this.readCurrent()
+    if (all[scope]) {
+      delete all[scope]
+      await writeFileAtomic(this.currentFile(), stableStringify(all))
     }
+    await this.secrets.deletePrefix(this.secretPrefix(scope))
   }
 }
 
@@ -219,10 +228,10 @@ export async function listEnvironments(root: string): Promise<EnvironmentInfo[]>
     names.map(async (n): Promise<EnvironmentInfo> => {
       const id = `environments/${n}`
       try {
-        const doc = await readJsonFile<{ name?: string }>(join(root, id))
+        const doc = await readJsonFile<{ name?: string }>(resolveEnvPath(root, id))
         return { id, name: doc.name ?? basename(n, ENV_EXT) }
       } catch (e) {
-        return { id, name: basename(n, ENV_EXT), error: `Invalid JSON: ${(e as Error).message}` }
+        return { id, name: basename(n, ENV_EXT), error: (e as Error).message }
       }
     }),
   )
@@ -235,27 +244,28 @@ async function envFileName(root: string, name: string, except?: string): Promise
 }
 
 export async function createEnvironment(root: string, name: string, values: PmVariable[] = []): Promise<string> {
+  await mkdir(join(root, 'environments'), { recursive: true })
   const file = await envFileName(root, name)
   const doc = { id: randomUUID(), name, values, _postman_variable_scope: 'environment' }
-  await mkdir(join(root, 'environments'), { recursive: true })
   await writeFileAtomic(join(root, 'environments', file), stableStringify(doc))
   return `environments/${file}`
 }
 
-/** Renames the environment and its file; values are keyed by the id inside, so nothing is lost. */
-export async function renameEnvironment(root: string, id: string, name: string): Promise<string> {
+/** Renames the environment and its file, moving its local values along. */
+export async function renameEnvironment(root: string, id: string, name: string, vars: Variables): Promise<string> {
   const path = resolveEnvPath(root, id)
   const doc = await readJsonFile<Record<string, unknown>>(path)
   doc.name = name
   await writeFileAtomic(path, stableStringify(doc))
   const file = await envFileName(root, name, basename(path))
   if (file === basename(path)) return id
+  const newId = `environments/${file}`
   await rename(path, join(root, 'environments', file))
-  return `environments/${file}`
+  await vars.move(`env:${id}`, `env:${newId}`)
+  return newId
 }
 
 export async function deleteEnvironment(root: string, id: string, vars: Variables): Promise<void> {
-  const scopeId = await vars.scopeId(`env:${id}`)
   await rm(resolveEnvPath(root, id), { force: true })
-  if (scopeId) await vars.forget(scopeId)
+  await vars.forget(`env:${id}`)
 }

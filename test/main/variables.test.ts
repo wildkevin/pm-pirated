@@ -98,6 +98,25 @@ describe('script changes', () => {
   })
 })
 
+describe('local values are keyed by path, not by ids inside files', () => {
+  it('a copied environment file with the same id does not see the original secrets', async () => {
+    const dev = await createEnvironment(root, 'Dev')
+    await vars.write(`env:${dev}`, [row('pw', 'hunter2', { type: 'secret' }), row('u', 'a', { current: 'mine' })])
+    const copy = JSON.parse(await readFile(join(root, dev), 'utf8'))
+    await writeFile(join(root, 'environments', 'Evil.env.json'), JSON.stringify({ ...copy, name: 'Evil' }))
+    expect(await vars.read('env:environments/Evil.env.json')).toEqual([row('pw', '', { type: 'secret' }), row('u', 'a')])
+  })
+
+  it('moves local values when a collection is renamed', async () => {
+    const col = await createCollection(root, 'C')
+    await vars.write(`col:${col}`, [row('s', 'x', { type: 'secret', current: 'y' }), row('c', '1', { current: '2' })])
+    await vars.move(`col:${col}`, 'col:collections/D')
+    const { rename } = await import('node:fs/promises')
+    await rename(join(root, col), join(root, 'collections', 'D'))
+    expect(await vars.read('col:collections/D')).toEqual([row('s', 'x', { type: 'secret', current: 'y' }), row('c', '1', { current: '2' })])
+  })
+})
+
 describe('environments', () => {
   it('creates, lists, renames (keeping values) and deletes environments', async () => {
     const dev = await createEnvironment(root, 'Dev')
@@ -105,7 +124,7 @@ describe('environments', () => {
     await vars.write(`env:${dev}`, [row('u', 'a', { current: 'local' }), row('s', 'sec', { type: 'secret' })])
     expect((await listEnvironments(root)).map((e) => e.name)).toEqual(['Dev', 'Prod'])
 
-    const renamed = await renameEnvironment(root, dev, 'Development')
+    const renamed = await renameEnvironment(root, dev, 'Development', vars)
     expect(renamed).toBe('environments/Development.env.json')
     expect(await vars.read(`env:${renamed}`)).toEqual([row('u', 'a', { current: 'local' }), row('s', 'sec', { type: 'secret' })])
 
@@ -124,7 +143,15 @@ describe('environments', () => {
   })
 
   it('rejects scope ids that point outside the workspace', async () => {
-    for (const bad of ['env:../x.env.json', 'env:environments/../../x.env.json', 'col:../x', 'nope']) {
+    for (const bad of [
+      'env:../x.env.json',
+      'env:environments/../../x.env.json',
+      'env:environments/a\\..\\..\\x.env.json',
+      'env:environments/C:x.env.json',
+      'col:../x',
+      'col:collections/C/Folder',
+      'nope',
+    ]) {
       await expect(vars.read(bad), bad).rejects.toThrow()
     }
   })
