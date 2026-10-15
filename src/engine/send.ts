@@ -118,14 +118,17 @@ function realOrSelf(p: string): string {
 function proxyList(o: EngineOptions): unknown {
   const p = o.customProxy
   if (!p || !p.host) return undefined
-  const match = `${p.protocols.join('+')}://*/*`
+  // Patterns need `:*` to match URLs with an explicit port (`*` alone only matches default ports).
+  const match = `${p.protocols.join('+')}://*:*/*`
+  // Settings hold plain host names (`api.corp`, `*.internal`); the SDK wants URL match patterns.
+  const bypass = p.bypass.map((h) => (h.includes('://') ? h : `http+https://${h}:*/*`))
   return new ProxyConfigList({}, [
     {
       match,
       host: p.host,
       port: p.port,
       tunnel: false,
-      bypass: p.bypass,
+      bypass,
       ...(p.username ? { authenticate: true, username: p.username, password: p.password ?? '' } : {}),
     },
   ])
