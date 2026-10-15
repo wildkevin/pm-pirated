@@ -18,6 +18,7 @@ declare module 'postman-collection' {
   export class VariableScope {
     constructor(definition: unknown)
     values: { toJSON(): { key: string; value: unknown; type?: string; disabled?: boolean }[] }
+    replaceIn(text: string): string
   }
   export class ProxyConfig {
     constructor(definition: unknown)

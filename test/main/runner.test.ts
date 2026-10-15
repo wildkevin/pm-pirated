@@ -75,6 +75,43 @@ describe('saved runs', () => {
   })
 })
 
+describe('redaction', () => {
+  it('masks credential headers and secret values everywhere they appear', async () => {
+    const { redactRecord } = await import('../../src/main/runner')
+    const out = redactRecord(
+      {
+        id: 'r',
+        name: 'C',
+        startedAt: 0,
+        target: 't',
+        environment: null,
+        config: {} as never,
+        summary: null,
+        results: [
+          {
+            iteration: 0,
+            requestId: 'x',
+            name: 'x',
+            method: 'GET',
+            url: 'https://a/?key=S3CRET-KEY',
+            tests: [],
+            scriptErrors: [],
+            logs: [{ level: 'log', args: ['token is S3CRET-KEY'] }],
+            sent: { method: 'GET', url: 'https://a/?key=S3CRET-KEY', headers: [{ key: 'Authorization', value: 'Bearer abc' }, { key: 'X-Other', value: 'v S3CRET-KEY' }], body: 'pw=S3CRET-KEY' },
+            response: { headers: [{ key: 'Set-Cookie', value: 'sid=1' }], body: 'echo S3CRET-KEY' },
+          },
+        ],
+      },
+      ['S3CRET-KEY', 'abc'],
+    )
+    const text = JSON.stringify(out)
+    expect(text).not.toContain('S3CRET-KEY')
+    expect(text).not.toContain('Bearer abc')
+    expect(text).not.toContain('sid=1')
+    expect(out.results[0].sent!.headers[1].value).toBe('v ••••••')
+  })
+})
+
 describe('code snippets', () => {
   const item: PmItem = {
     name: 'x',

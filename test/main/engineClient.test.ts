@@ -64,7 +64,7 @@ describe('EngineClient', () => {
     )
     const a = client.call('cancel', { sendId: 'x' })
     procs[0].die(9)
-    await expect(a).rejects.toThrow('Engine process stopped unexpectedly')
+    await expect(a).rejects.toThrow('Background process stopped unexpectedly')
     expect(onCrash).toHaveBeenCalledWith(9)
     const b = client.call('cookies.list', { cookieFile: 'f' })
     expect(procs).toHaveLength(2)

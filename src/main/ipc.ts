@@ -11,7 +11,7 @@ import { CHANNELS, RUNNER_EVENT, type Api, type ImportResult, type ResolvedVaria
 import type { EngineClient } from './engineClient'
 import { codeLanguages, generateCode } from './codegen'
 import { ARGS } from './ipcSchemas'
-import { buildRunCollection, deleteRun, listRuns, previewData, readDataFile, readRun, saveRun } from './runner'
+import { buildRunCollection, deleteRun, listRuns, previewData, readDataFile, readRun, redactRecord, saveRun } from './runner'
 import { getToken, parseCallback } from './oauth2'
 import { engineOptions } from './netconfig'
 import type { SecretStore } from './secrets'
@@ -51,6 +51,15 @@ export function registerIpc(deps: IpcDeps): void {
     vars = new Variables(dir, deps.secrets)
   }
   const cookieFile = () => join(ws(), '.pmlocal', 'cookies.json')
+
+  // Files the user picked in a dialog this session; other paths from the window must be in the workspace.
+  const pickedFiles = new Set<string>()
+  const dataFilePath = (path: string) => {
+    const abs = resolve(ws(), path)
+    const rel = relative(ws(), abs)
+    if (pickedFiles.has(abs) || (rel && !rel.startsWith('..') && !isAbsolute(rel))) return abs
+    throw new Error('Choose the data file with Select File')
+  }
 
   // Collection runs in progress; results stream to the window and are saved when done.
   const runs = new Map<string, RunRecord>()
@@ -232,7 +241,7 @@ export function registerIpc(deps: IpcDeps): void {
       const collectionId = store.collectionOf(config.target)
       collection.variable = await v.effective(`col:${collectionId}`)
       const env = config.environmentId ? (await store.openWorkspace(dir)).environments.find((e) => e.id === config.environmentId) : undefined
-      const data = config.dataFile ? await readDataFile(resolve(dir, config.dataFile)) : []
+      const data = config.dataFile ? await readDataFile(dataFilePath(config.dataFile)) : []
       const record: RunRecord = {
         id: runId,
         name: (await store.readContainer(dir, config.target)).name,
@@ -244,6 +253,16 @@ export function registerIpc(deps: IpcDeps): void {
         results: [],
       }
       runs.set(runId, record)
+      // Secret variable values, masked in the saved results (live results are not masked).
+      const secretValues = async () =>
+        [
+          ...(await v.effective('globals')),
+          ...(await v.effective(`col:${collectionId}`)),
+          ...(env ? await v.effective(`env:${env.id}`) : []),
+        ]
+          .filter((x) => x.type === 'secret')
+          .map((x) => x.value)
+      const secretsBefore = await secretValues()
       const spec: RunnerSpec = {
         collection,
         ...(env ? { environment: { name: env.name, values: await v.effective(`env:${env.id}`) } } : {}),
@@ -266,13 +285,13 @@ export function registerIpc(deps: IpcDeps): void {
               v.applyChanges('globals', after.globals),
               v.applyChanges(`col:${collectionId}`, after.collection),
             ]).catch((e) => (record.error = `Could not save variable changes: ${(e as Error).message}`))
-          await saveRun(dir, record).catch(() => undefined)
+          await saveRun(dir, redactRecord(record, [...secretsBefore, ...(await secretValues().catch(() => []))])).catch(() => undefined)
           runs.delete(runId)
           sendRunner({ runId, done: summary })
         },
         async (e: Error) => {
           record.error = e.message
-          await saveRun(dir, record).catch(() => undefined)
+          await saveRun(dir, redactRecord(record, secretsBefore)).catch(() => undefined)
           runs.delete(runId)
           sendRunner({ runId, error: e.message })
         },
@@ -283,7 +302,7 @@ export function registerIpc(deps: IpcDeps): void {
       await deps.engine.call('runStop', { runId })
     },
     // Picked files inside the workspace come back relative to it.
-    previewDataFile: (path) => previewData(resolve(ws(), path)),
+    previewDataFile: (path) => previewData(dataFilePath(path)),
     listRuns: () => listRuns(ws()),
     readRun: (id) => readRun(ws(), id),
     deleteRun: (id) => deleteRun(ws(), id),
@@ -315,6 +334,7 @@ export function registerIpc(deps: IpcDeps): void {
       const res = await dialog.showOpenDialog(deps.win, { title, properties: ['openFile'] })
       const file = res.filePaths[0]
       if (res.canceled || !file) return null
+      pickedFiles.add(resolve(file))
       if (!root) return file
       const rel = relative(root, file)
       return rel && !rel.startsWith('..') && !isAbsolute(rel) ? rel.split('\\').join('/') : file
