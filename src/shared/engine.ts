@@ -87,8 +87,6 @@ export interface EngineOptions {
   customProxy?: ProxyRule
   /** Postman's "Allow reading files outside working directory" (off by default). */
   allowFilesOutsideWorkingDir: boolean
-  /** Files the user configured in Settings (certificates); always readable. */
-  allowedFiles: string[]
   /** PEM file with extra trusted CAs (Windows store + user CA), or undefined. */
   extraCaFile?: string
   clientCerts: ClientCert[]

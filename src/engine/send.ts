@@ -1,5 +1,6 @@
 import runtime from 'postman-runtime'
 import { CertificateList, Collection, ProxyConfig, ProxyConfigList, Url, VariableScope } from 'postman-collection'
+import { randomUUID } from 'node:crypto'
 import * as fs from 'node:fs'
 import { isAbsolute, relative, resolve } from 'node:path'
 import { inspect } from 'node:util'
@@ -69,16 +70,18 @@ function formatArg(a: unknown): string {
 }
 
 /**
- * fs for form-data/binary/certificate files: relative paths resolve against the workspace. Like
- * Postman, files outside it are refused unless the user allowed that in Settings (a shared
- * collection must not be able to upload ~/.ssh/id_rsa) or configured that exact file themselves.
+ * fs for request files: relative paths resolve against the workspace. Like Postman, files outside
+ * it are refused unless the user allowed that in Settings (a shared collection must not be able to
+ * upload ~/.ssh/id_rsa). Certificates configured in Settings are reachable only through `privateFiles`,
+ * whose names are random per send, so a request body cannot name them.
  */
-export function fileResolver(workingDir: string, o: Pick<EngineOptions, 'allowFilesOutsideWorkingDir' | 'allowedFiles'>): unknown {
+export function fileResolver(workingDir: string, allowOutside: boolean, privateFiles: Map<string, string> = new Map()): unknown {
   const root = realOrSelf(workingDir)
-  const allowed = new Set(o.allowedFiles.map((f) => resolve(f)))
   const check = (p: string): string => {
+    const configured = privateFiles.get(p)
+    if (configured) return configured
     const abs = resolve(workingDir, p)
-    if (o.allowFilesOutsideWorkingDir || allowed.has(abs)) return abs
+    if (allowOutside) return abs
     const rel = relative(root, realOrSelf(abs))
     if (rel.startsWith('..') || isAbsolute(rel))
       throw new Error(`Reading ${p} is blocked: it is outside the workspace folder (Settings > General > Allow reading files outside working directory)`)
@@ -128,15 +131,15 @@ function proxyList(o: EngineOptions): unknown {
   ])
 }
 
-function certificateList(o: EngineOptions): unknown {
+function certificateList(o: EngineOptions, privateName: (real: string) => string): unknown {
   if (!o.clientCerts.length) return undefined
   return new CertificateList(
     {},
     o.clientCerts.map((c) => ({
       matches: [`https://${c.host.includes(':') ? c.host : `${c.host}:*`}/*`],
-      ...(c.cert ? { cert: { src: c.cert } } : {}),
-      ...(c.key ? { key: { src: c.key } } : {}),
-      ...(c.pfx ? { pfx: { src: c.pfx } } : {}),
+      ...(c.cert ? { cert: { src: privateName(c.cert) } } : {}),
+      ...(c.key ? { key: { src: privateName(c.key) } } : {}),
+      ...(c.pfx ? { pfx: { src: privateName(c.pfx) } } : {}),
       ...(c.passphrase ? { passphrase: c.passphrase } : {}),
     })),
   )
@@ -204,21 +207,28 @@ export function startSend(spec: SendSpec, deps: SendDeps = {}): SendHandle {
 
   const o = spec.options
   const collection = new Collection(buildCollection(spec.item, spec.parents))
+  const privateFiles = new Map<string, string>()
+  const privatePrefix = `pmlocal-private-${randomUUID()}`
+  const privateName = (real: string) => {
+    const name = `${privatePrefix}/${privateFiles.size}`
+    privateFiles.set(name, real)
+    return name
+  }
   const runOptions: Record<string, unknown> = {
     environment,
     globals,
     timeout: { request: o.timeoutMs },
-    fileResolver: fileResolver(spec.workingDir, o),
+    fileResolver: fileResolver(spec.workingDir, o.allowFilesOutsideWorkingDir, privateFiles),
     ignoreProxyEnvironmentVariables: !o.respectProxyEnv,
     proxies: proxyList(o),
-    certificates: certificateList(o),
+    certificates: certificateList(o, privateName),
     requester: {
       cookieJar: jarFor(spec.cookieFile),
       strictSSL: o.strictSSL,
       followRedirects: o.followRedirects,
       implicitTraceHeader: o.sendPostmanToken,
       ...(o.maxResponseSizeMb > 0 ? { maxResponseSize: o.maxResponseSizeMb * 1024 * 1024 } : {}),
-      ...(o.extraCaFile ? { extendedRootCA: o.extraCaFile } : {}),
+      ...(o.extraCaFile ? { extendedRootCA: privateName(o.extraCaFile) } : {}),
     },
   }
   if (o.useSystemProxy && deps.resolveSystemProxy) {

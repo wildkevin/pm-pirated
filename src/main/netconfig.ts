@@ -64,10 +64,6 @@ export function engineOptions(settings: AppSettingsData, extraCaFile: string | u
     followRedirects: general.followRedirects,
     sendPostmanToken: general.sendPostmanToken,
     allowFilesOutsideWorkingDir: general.allowFilesOutsideWorkingDir,
-    allowedFiles: [
-      ...certificates.client.flatMap((c) => [c.cert, c.key, c.pfx]),
-      ...(certificates.ca.enabled ? [certificates.ca.file] : []),
-    ].filter((f): f is string => !!f),
     useSystemProxy: proxy.useSystemProxy,
     respectProxyEnv: proxy.respectEnvVars,
     ...(c.enabled && c.host && protocols.length

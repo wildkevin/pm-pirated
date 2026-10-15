@@ -57,7 +57,6 @@ const options: EngineOptions = {
   respectProxyEnv: false, // ignores this machine's http_proxy, like Postman's default
   clientCerts: [],
   allowFilesOutsideWorkingDir: false,
-  allowedFiles: [],
 }
 
 const item = (url: string, extra: Partial<PmItem['request']> = {}, more: Partial<PmItem> = {}): PmItem => ({
@@ -164,8 +163,20 @@ describe('file access', () => {
 
     const allowed = await send(upload(outside), { options: { ...options, allowFilesOutsideWorkingDir: true } })
     expect(echo(allowed).body).toContain('PRIVATE-KEY')
-    const listed = await send(upload(outside), { options: { ...options, allowedFiles: [outside] } })
-    expect(echo(listed).body).toContain('PRIVATE-KEY')
+    // A client-certificate key configured in Settings stays unreadable for request bodies.
+    const certConfigured = await send(upload(outside), { options: { ...options, clientCerts: [{ host: 'other.test', key: outside, cert: outside }] } })
+    expect(JSON.stringify(certConfigured.report)).not.toContain('PRIVATE-KEY')
+  })
+})
+
+describe('private files', () => {
+  it('serves configured files only under their random per-send names', async () => {
+    const { fileResolver } = await import('../../src/engine/send')
+    const real = join(await mkdtemp(join(tmpdir(), 'pml-cert-')), 'client.key')
+    await writeFile(real, 'KEY')
+    const r = fileResolver(dir, false, new Map([['pmlocal-private-abc/0', real]])) as typeof import('node:fs')
+    expect(r.readFileSync('pmlocal-private-abc/0', 'utf8')).toBe('KEY')
+    expect(() => r.readFileSync(real, 'utf8')).toThrow(/outside the workspace/)
   })
 })
 
