@@ -152,11 +152,13 @@ describe('history', () => {
 
 describe('ui state', () => {
   it('round-trips and survives garbage', async () => {
-    const state = { activeEnvironment: 'environments/Dev.env.json', tabs: [{ id: null, item: { name: 'Draft', request: { method: 'GET', url: 'x', header: [] } } }], activeIndex: 0 }
+    const state = { activeEnvironment: 'environments/Dev.env.json', tabs: [{ id: null, item: { name: 'Draft', request: { method: 'GET', url: 'x', header: [] } } }], activeIndex: 0, favorites: ['collections/Shop'] }
     await writeUiState(root, state)
     expect(await readUiState(root)).toEqual(state)
     const { writeFile } = await import('node:fs/promises')
     await writeFile(join(root, '.pmlocal', 'state.json'), 'nope')
     expect(await readUiState(root)).toEqual({ activeEnvironment: null, tabs: [], activeIndex: -1 })
+    await writeFile(join(root, '.pmlocal', 'state.json'), JSON.stringify({ ...state, favorites: [1, 'collections/A'] }))
+    expect((await readUiState(root)).favorites).toEqual(['collections/A'])
   })
 })

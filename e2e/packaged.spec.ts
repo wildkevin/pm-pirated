@@ -46,11 +46,12 @@ test('packaged app: request engine, mock server and capture proxy processes all 
   await page.getByRole('button', { name: 'Stop proxy' }).click()
 
   // Mock server process.
-  await page.getByRole('button', { name: 'New collection' }).click()
+  await page.getByRole('button', { name: 'Create new' }).click()
+  await page.getByRole('menuitem', { name: 'Collection' }).click()
   await page.getByLabel('Name').press('Enter')
   const mockPort = await freePort()
-  await page.getByRole('button', { name: 'Mock Servers' }).click()
-  await page.getByRole('button', { name: 'New mock server' }).click()
+  await page.getByRole('button', { name: 'Create new' }).click()
+  await page.getByRole('menuitem', { name: 'Mock Server' }).click()
   await page.getByRole('dialog', { name: 'Create mock server' }).getByLabel('Port').fill(String(mockPort))
   await page.getByRole('button', { name: 'Create Mock Server' }).click()
   await page.getByRole('button', { name: 'Start' }).click()

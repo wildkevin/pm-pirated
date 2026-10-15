@@ -25,6 +25,7 @@ const uiState = z.object({
   activeEnvironment: z.string().nullable(),
   tabs: z.array(z.object({ id: z.string().nullable(), item: pmItem, saved: z.string().optional() })).max(200),
   activeIndex: z.number().int(),
+  favorites: z.array(z.string().max(2000)).max(1000).optional(),
 })
 
 const userPass = z.object({ enabled: z.boolean(), username: z.string(), password: z.string() })
@@ -79,10 +80,12 @@ export const ARGS = {
   openWorkspaceDialog: z.tuple([]),
   currentWorkspace: z.tuple([]),
   refreshWorkspace: z.tuple([]),
+  openRecentWorkspace: z.tuple([z.string().max(4096)]),
   createCollection: z.tuple([name]),
   createFolder: z.tuple([id, name]),
   createRequest: z.tuple([id, name, pmItem.optional()]),
   renameNode: z.tuple([id, name]),
+  duplicateNode: z.tuple([id]),
   deleteNode: z.tuple([id]),
   readRequest: z.tuple([id]),
   saveRequest: z.tuple([id, pmItem]),

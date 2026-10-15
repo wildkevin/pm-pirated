@@ -12,6 +12,12 @@ test.skip(!process.env.PM_LOCAL_GALLERY, 'set PM_LOCAL_GALLERY=1 to regenerate d
 const out = (n: string) => join(__dirname, '..', 'docs', 'screenshots', `${n}.png`)
 const freePort = () => new Promise<number>((r) => { const s = net.createServer().listen(0, '127.0.0.1', () => { const p = (s.address() as AddressInfo).port; s.close(() => r(p)) }) })
 
+async function rowActions(page: Page, name: string) {
+  const row = page.getByRole('treeitem').filter({ has: page.getByText(name, { exact: true }) }).first()
+  await row.hover()
+  await row.getByRole('button', { name: `Actions for ${name}` }).click()
+}
+
 test('gallery', async () => {
   test.setTimeout(240_000)
   const server = http.createServer((q, r) => {
@@ -39,7 +45,7 @@ test('gallery', async () => {
   await page.getByRole('button', { name: 'Open workspace' }).first().click()
 
   // Environment
-  await page.getByRole('button', { name: 'New', exact: true }).click()
+  await page.getByRole('button', { name: 'Create new' }).click()
   await page.getByRole('menuitem', { name: 'Environment' }).click()
   await page.getByLabel('Name').fill('Staging'); await page.getByLabel('Name').press('Enter')
   for (const [i, [k, v]] of [['baseUrl', base], ['apiKey', 'sk_test_51Hx'], ['customerId', 'cus_9921']].entries()) {
@@ -52,15 +58,16 @@ test('gallery', async () => {
   await shot('05-environment-editor')
 
   // Collection with folders and requests
-  await page.getByRole('button', { name: 'Collections' }).click()
-  await page.getByRole('button', { name: 'New collection' }).click()
+  await page.getByRole('tab', { name: /^Collections/ }).click()
+  await page.getByRole('button', { name: 'Create new' }).click()
+  await page.getByRole('menuitem', { name: 'Collection' }).click()
   await page.getByLabel('Name').fill('Payments API'); await page.getByLabel('Name').press('Enter')
-  await page.getByRole('button', { name: 'Actions for Payments API' }).click()
+  await rowActions(page, 'Payments API')
   await page.getByRole('menuitem', { name: 'Add folder' }).click()
   await page.getByLabel('Name').fill('Customers'); await page.getByLabel('Name').press('Enter')
   const reqs: [string, string, string][] = [['List customers', 'GET', '{{baseUrl}}/customers?limit=20&status=active'], ['Create order', 'POST', '{{baseUrl}}/orders'], ['Refund payment', 'DELETE', '{{baseUrl}}/payments/:paymentId'], ['Get customer', 'GET', '{{baseUrl}}/customers/{{customerId}}']]
   for (const [n, m, u] of reqs) {
-    await page.getByRole('button', { name: 'Actions for Payments API' }).click()
+    await rowActions(page, 'Payments API')
     await page.getByRole('menuitem', { name: 'Add request' }).click()
     await page.getByLabel('Name').fill(n); await page.getByLabel('Name').press('Enter')
     await page.getByLabel('HTTP method').selectOption(m)
@@ -130,12 +137,12 @@ test('gallery', async () => {
   await page.locator('.status-bar').getByRole('button', { name: 'Console' }).click()
 
   // History
-  await page.getByRole('button', { name: 'History' }).click()
+  await page.getByRole('tab', { name: 'History' }).click()
   await shot('13-history')
-  await page.getByRole('button', { name: 'Collections' }).click()
+  await page.getByRole('tab', { name: /^Collections/ }).click()
 
   // Modals
-  await page.locator('.sidebar-head').getByRole('button', { name: 'Import' }).click()
+  await page.locator('.sb-toolbar').getByRole('button', { name: 'Import' }).click()
   await page.getByLabel('Import text').fill(`curl -X POST '${base}/orders' -H 'Content-Type: application/json' --data-raw '{"items":[]}'`)
   await shot('14-import')
   await page.keyboard.press('Escape')
@@ -147,7 +154,7 @@ test('gallery', async () => {
   await shot('17-settings-certificates')
   await page.keyboard.press('Escape')
   await page.getByTestId('tree-row').filter({ hasText: 'Get customer' }).click()
-  await page.getByRole('button', { name: 'Cookies', exact: true }).click()
+  await page.locator('.status-bar').getByRole('button', { name: 'Cookies' }).click()
   await page.locator('.cookie-domain').first().click()
   await shot('18-cookies')
   await page.keyboard.press('Escape')
@@ -160,7 +167,7 @@ test('gallery', async () => {
   // Runner with data file
   await writeFile(join(dir, 'customers.csv'), 'customerId\ncus_9921\ncus_7310\ncus_5528\n')
   await app.evaluate(({ dialog }, f) => { dialog.showOpenDialog = (async () => ({ canceled: false, filePaths: [f] })) as any }, join(dir, 'customers.csv'))
-  await page.getByRole('button', { name: 'Actions for Payments API' }).click()
+  await rowActions(page, 'Payments API')
   await page.getByRole('menuitem', { name: 'Run' }).click()
   await page.getByRole('button', { name: 'Select File' }).click()
   await page.getByRole('button', { name: /^Run Payments API/ }).click()
@@ -172,7 +179,8 @@ test('gallery', async () => {
   await page.getByRole('button', { name: 'Save as example' }).click()
   await page.keyboard.press('ControlOrMeta+s')
   const mockPort = await freePort()
-  await page.getByRole('button', { name: 'Actions for Payments API' }).click()
+  await rowActions(page, 'Payments API')
+  await page.getByRole('menuitem', { name: 'More' }).hover()
   await page.getByRole('menuitem', { name: 'Mock', exact: true }).click()
   await page.getByRole('dialog', { name: 'Create mock server' }).getByLabel('Name').fill('Payments mock')
   await page.getByRole('dialog', { name: 'Create mock server' }).getByLabel('Port').fill(String(mockPort))
@@ -187,7 +195,7 @@ test('gallery', async () => {
   // Capture
   const capPort = await freePort()
   await page.locator('.status-bar').getByRole('button', { name: /Capture/ }).click()
-  await page.getByLabel('Port').fill(String(capPort))
+  await page.getByLabel('Port', { exact: true }).fill(String(capPort))
   await page.getByRole('button', { name: 'Start proxy' }).click()
   await page.getByTestId('capture-status').getByText('Listening').waitFor()
   for (const [m, p] of [['GET', '/customers?limit=5'], ['POST', '/orders'], ['GET', '/customers/42']]) {
@@ -198,9 +206,10 @@ test('gallery', async () => {
   await page.getByRole('button', { name: 'Stop proxy' }).click()
 
   // Performance
-  await page.getByRole('button', { name: 'Collections' }).click()
-  await page.getByRole('button', { name: 'Actions for Payments API' }).click()
-  await page.getByRole('menuitem', { name: 'Performance test' }).click()
+  await page.getByRole('tab', { name: /^Collections/ }).click()
+  await rowActions(page, 'Payments API')
+  await page.getByRole('menuitem', { name: 'More' }).hover()
+  await page.getByRole('menuitem', { name: 'Run performance test' }).click()
   await page.getByRole('button', { name: 'Ramp up' }).click()
   await page.getByLabel('Virtual users').fill('15')
   await page.getByLabel('Duration (s)').fill('10')

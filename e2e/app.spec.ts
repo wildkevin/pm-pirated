@@ -38,17 +38,25 @@ async function stubDialogs(app: ElectronApplication, dir: string) {
 
 async function openWorkspace(page: Page) {
   await page.getByRole('button', { name: 'Open workspace' }).first().click()
-  await expect(page.getByRole('button', { name: 'New collection' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Create new' })).toBeVisible()
 }
 
 async function newCollectionWithRequest(page: Page, collection: string, request: string) {
-  await page.getByRole('button', { name: 'New collection' }).click()
+  await page.getByRole('button', { name: 'Create new' }).click()
+  await page.getByRole('menuitem', { name: 'Collection' }).click()
   await page.getByLabel('Name').fill(collection)
   await page.getByLabel('Name').press('Enter')
-  await page.getByRole('button', { name: `Actions for ${collection}` }).click()
+  await rowActions(page, collection)
   await page.getByRole('menuitem', { name: 'Add request' }).click()
   await page.getByLabel('Name').fill(request)
   await page.getByLabel('Name').press('Enter')
+}
+
+/** Row actions (⋯) appear on hover, as in Postman. */
+async function rowActions(page: Page, name: string) {
+  const row = page.getByRole('treeitem').filter({ has: page.getByText(name, { exact: true }) }).first()
+  await row.hover()
+  await row.getByRole('button', { name: `Actions for ${name}` }).click()
 }
 
 const urlBar = (page: Page) => page.getByLabel('Request URL')
@@ -115,7 +123,7 @@ test('environment variables, collection auth, scripts, tests and console', async
   await openWorkspace(page)
 
   // Environment "Dev" with base = local server, made active.
-  await page.getByRole('button', { name: 'New', exact: true }).click()
+  await page.getByRole('button', { name: 'Create new' }).click()
   await page.getByRole('menuitem', { name: 'Environment' }).click()
   await page.getByLabel('Name').fill('Dev')
   await page.getByLabel('Name').press('Enter')
@@ -126,7 +134,7 @@ test('environment variables, collection auth, scripts, tests and console', async
   await expect(page.getByLabel('Unsaved changes')).toHaveCount(0)
   await page.getByLabel('Environment', { exact: true }).selectOption({ label: 'Dev' })
 
-  await page.getByRole('button', { name: 'Collections' }).click()
+  await page.getByRole('tab', { name: /^Collections/ }).click()
   await newCollectionWithRequest(page, 'Vars', 'Scripted')
   await urlBar(page).fill('{{base}}/users/{{missing}}')
   await expect(page.locator('.cm-var-ok')).toHaveText('{{base}}')
@@ -165,7 +173,8 @@ test('paste cURL into a new tab, send it, save the draft into a collection', asy
   const page = await app.firstWindow()
   await stubDialogs(app, dir)
   await openWorkspace(page)
-  await page.getByRole('button', { name: 'New collection' }).click()
+  await page.getByRole('button', { name: 'Create new' }).click()
+  await page.getByRole('menuitem', { name: 'Collection' }).click()
   await page.getByLabel('Name').fill('Inbox')
   await page.getByLabel('Name').press('Enter')
 
@@ -197,7 +206,7 @@ test('import a Postman collection by pasting JSON', async () => {
   await stubDialogs(app, await temp('pml-ws-'))
   await openWorkspace(page)
   const fixture = await readFile(join(__dirname, '..', 'test', 'fixtures', 'sample.postman_collection.json'), 'utf8')
-  await page.locator('.sidebar-head').getByRole('button', { name: 'Import' }).click()
+  await page.locator('.sb-toolbar').getByRole('button', { name: 'Import' }).click()
   await page.getByLabel('Import text').fill(fixture)
   await page.getByRole('dialog', { name: 'Import' }).getByRole('button', { name: 'Import' }).click()
   await expect(page.getByTestId('tree-row').filter({ hasText: 'Sample API' })).toBeVisible()
@@ -229,7 +238,7 @@ test('collection runner with a CSV data file, and the code snippet panel', async
   await page.getByRole('tab', { name: 'Tests' }).click()
   await page.getByLabel('Tests script').fill('pm.test("ok", () => pm.response.to.have.status(200))')
   await page.keyboard.press('ControlOrMeta+s')
-  await page.getByRole('button', { name: 'Actions for Suite' }).click()
+  await rowActions(page, 'Suite')
   await page.getByRole('menuitem', { name: 'Add request' }).click()
   await page.getByLabel('Name').fill('Second')
   await page.getByLabel('Name').press('Enter')
@@ -252,7 +261,7 @@ test('collection runner with a CSV data file, and the code snippet panel', async
     dialog.showOpenDialog = (async () => ({ canceled: false, filePaths: [f] })) as typeof dialog.showOpenDialog
   }, join(dir, 'users.csv'))
 
-  await page.getByRole('button', { name: 'Actions for Suite' }).click()
+  await rowActions(page, 'Suite')
   await page.getByRole('menuitem', { name: 'Run' }).click()
   await page.getByRole('button', { name: 'Select File' }).click()
   await expect(page.getByText('2 rows · columns: user')).toBeVisible()
@@ -288,7 +297,8 @@ test('mock server answers with a saved example', async () => {
   await page.keyboard.press('ControlOrMeta+s')
   await expect(page.getByLabel('Unsaved changes')).toHaveCount(0)
 
-  await page.getByRole('button', { name: 'Actions for Shop' }).click()
+  await rowActions(page, 'Shop')
+  await page.getByRole('menuitem', { name: 'More' }).hover()
   await page.getByRole('menuitem', { name: 'Mock', exact: true }).click()
   const dialog = page.getByRole('dialog', { name: 'Create mock server' })
   await dialog.getByLabel('Name').fill('Shop mock')
@@ -322,7 +332,7 @@ test('capture proxy records traffic and saves it to History', async () => {
   await stubDialogs(app, await temp('pml-ws-'))
   await openWorkspace(page)
   await page.locator('.status-bar').getByRole('button', { name: /Capture/ }).click()
-  await page.getByLabel('Port').fill(String(port))
+  await page.getByLabel('Port', { exact: true }).fill(String(port))
   await page.getByRole('button', { name: 'Start proxy' }).click()
   await expect(page.getByTestId('capture-status')).toHaveText(`Listening on 127.0.0.1:${port}`)
 
@@ -336,7 +346,7 @@ test('capture proxy records traffic and saves it to History', async () => {
     req.end('{"hello":"proxy"}')
   })
   await expect(page.getByTestId('capture-list')).toContainText('/captured?x=1')
-  await page.getByRole('button', { name: 'History' }).click()
+  await page.getByRole('tab', { name: 'History' }).click()
   await expect(page.getByTestId('history-row').first()).toContainText('/captured?x=1')
 
   await page.getByRole('tab', { name: /Capture/ }).click()
@@ -353,8 +363,9 @@ test('performance test runs virtual users and reports metrics', async () => {
   await newCollectionWithRequest(page, 'Perf', 'Ping')
   await urlBar(page).fill(`${base}/ping`)
   await page.keyboard.press('ControlOrMeta+s')
-  await page.getByRole('button', { name: 'Actions for Perf' }).click()
-  await page.getByRole('menuitem', { name: 'Performance test' }).click()
+  await rowActions(page, 'Perf')
+  await page.getByRole('menuitem', { name: 'More' }).hover()
+  await page.getByRole('menuitem', { name: 'Run performance test' }).click()
   await page.getByLabel('Virtual users').fill('2')
   await page.getByLabel('Duration (s)').fill('2')
   await page.getByRole('button', { name: 'Run', exact: true }).click()
@@ -385,7 +396,8 @@ test('zoom with Ctrl+= / Ctrl+- / Ctrl+0 is remembered; the sidebar can be hidde
   await key(app, '-')
   await expect.poll(() => zoom(app)).toBe(0.5)
   // The pane stays in the DOM at zero width when hidden.
-  const sidebarWidth = async () => (await page.locator('.sidebar').boundingBox())?.width ?? 0
+  // Measure the pane, not the sidebar (its padding keeps it a few px wide when hidden).
+  const sidebarWidth = async () => (await page.locator('.sidebar').locator('..').boundingBox())?.width ?? 0
   await page.getByRole('button', { name: 'Hide sidebar' }).click()
   await expect.poll(sidebarWidth).toBeLessThan(2)
   await page.getByRole('button', { name: 'Show sidebar' }).click()
@@ -394,7 +406,7 @@ test('zoom with Ctrl+= / Ctrl+- / Ctrl+0 is remembered; the sidebar can be hidde
 
   app = await launch(userData)
   page = await app.firstWindow()
-  await expect(page.getByRole('button', { name: 'New collection' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Create new' })).toBeVisible()
   await expect.poll(() => zoom(app)).toBe(0.5)
   await key(app, '0')
   await expect.poll(() => zoom(app)).toBe(0)
@@ -432,5 +444,48 @@ test('tab context menu closes others / left / right; URL text sits in the middle
   await tabs.nth(0).click({ button: 'right' })
   await page.getByRole('menuitem', { name: 'Close all tabs' }).click()
   await expect(tabs).toHaveCount(0)
+  await app.close()
+})
+
+test('sidebar like Postman: preview tabs, double-click to keep, favorites, duplicate, search', async () => {
+  const app = await launch(await temp('pml-ud-'))
+  const page = await app.firstWindow()
+  await stubDialogs(app, await temp('pml-ws-'))
+  await openWorkspace(page)
+  await newCollectionWithRequest(page, 'Zoo', 'Lions')
+  await page.keyboard.press('ControlOrMeta+s')
+  await rowActions(page, 'Zoo')
+  await page.getByRole('menuitem', { name: 'Add request' }).click()
+  await page.getByLabel('Name').fill('Tigers')
+  await page.getByLabel('Name').press('Enter')
+  const tabs = page.locator('.tabs [role=tab]')
+  await page.locator('.tabs [role=tab]', { hasText: 'Tigers' }).click({ button: 'right' })
+  await page.getByRole('menuitem', { name: 'Close all tabs' }).click()
+  await expect(tabs).toHaveCount(0)
+
+  const row = (name: string) => page.getByRole('treeitem').filter({ has: page.getByText(name, { exact: true }) }).first()
+  await row('Lions').click()
+  await row('Tigers').click() // replaces the preview tab
+  await expect(tabs).toHaveCount(1)
+  await expect(tabs.first()).toHaveClass(/preview/)
+  await row('Tigers').dblclick() // keeps it
+  await expect(tabs.first()).not.toHaveClass(/preview/)
+  await row('Lions').click()
+  await expect(tabs).toHaveCount(2)
+
+  // Favorite + duplicate (copies sort after the original; favorites go first).
+  await rowActions(page, 'Zoo')
+  await page.getByRole('menuitem', { name: 'Duplicate' }).click()
+  await expect(row('Zoo Copy')).toBeVisible()
+  await row('Zoo Copy').hover()
+  await page.getByRole('button', { name: 'Favorite Zoo Copy' }).click()
+  await expect(page.getByRole('button', { name: 'Unfavorite Zoo Copy' })).toBeVisible()
+  await expect(page.locator('[role=tree][aria-label=Collections] .tree-name').first()).toHaveText('Zoo Copy')
+
+  // Ctrl+K search opens the request (kept, not preview).
+  await page.keyboard.press('ControlOrMeta+k')
+  await page.getByRole('dialog', { name: 'Search workspace' }).getByRole('textbox').fill('tig')
+  await page.keyboard.press('Enter')
+  await expect(page.locator('.tabs [role=tab].active')).toContainText('Tigers')
   await app.close()
 })

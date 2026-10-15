@@ -22,6 +22,7 @@ import type { AppSettings } from './settings'
 import { isTrustedUrl, rendererLocation } from './window'
 import { appendHistory, deleteHistory, listHistory } from './workspace/history'
 import * as store from './workspace/store'
+import { WorkspaceError } from './workspace/store'
 import { detect, exportCollection, exportEnvironment, importDetected } from './workspace/transfer'
 import { readUiState, writeUiState } from './workspace/uiState'
 import { Variables, createEnvironment, deleteEnvironment, renameEnvironment } from './workspace/variables'
@@ -109,6 +110,14 @@ export function registerIpc(deps: IpcDeps): void {
       use(last)
       return store.openWorkspace(last)
     },
+    async openRecentWorkspace(dir) {
+      // Only folders the user already opened through the picker.
+      if (!deps.settings.get().recentWorkspaces.includes(dir)) throw new WorkspaceError('Not a recent workspace')
+      if (!(await store.isWorkspace(dir))) throw new WorkspaceError(`${dir} is no longer a workspace folder`)
+      use(dir)
+      await deps.settings.rememberWorkspace(dir)
+      return store.openWorkspace(dir)
+    },
     refreshWorkspace: () => reopen(),
 
     async createCollection(name) {
@@ -130,6 +139,10 @@ export function registerIpc(deps: IpcDeps): void {
       // Mocks serving the renamed collection/folder follow it.
       for (const m of await readDefinitions(ws()))
         if (m.def.target === id || m.def.target.startsWith(`${id}/`)) await saveDefinition(ws(), m.id, { ...m.def, target: newId + m.def.target.slice(id.length) })
+      return { workspace: await reopen(), id: newId }
+    },
+    async duplicateNode(id) {
+      const newId = await store.duplicateNode(ws(), id)
       return { workspace: await reopen(), id: newId }
     },
     async deleteNode(id) {

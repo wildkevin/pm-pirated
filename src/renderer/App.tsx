@@ -1,5 +1,5 @@
 import { Allotment } from 'allotment'
-import { Code2, FolderOpen, PanelLeft, PlayCircle, Radio, Settings as SettingsIcon, Terminal } from 'lucide-react'
+import { Code2, Cookie, FolderOpen, Globe, PanelLeft, PlayCircle, Radio, Terminal } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import type { RunReport } from '../shared/engine'
 import type { PmAuth, PmItem, TreeNode } from '../shared/format/types'
@@ -26,7 +26,7 @@ import { Sidebar, type Panel, type SidebarActions } from './components/Sidebar'
 import { TabsBar } from './components/TabsBar'
 import { VariablesEditor } from './components/VariablesEditor'
 import { activeTab, initialState, isDirty, newDraft, reducer, tabTitle, toUiState, type Tab, type TabDoc } from './state'
-import logo from '../../build/icon.png'
+import { AppHeader, type SearchHit } from './components/AppHeader'
 
 let seq = 0
 const nextId = () => `${Date.now()}-${++seq}`
@@ -60,6 +60,11 @@ export function App() {
   const [consoleEntries, setConsoleEntries] = useState<ConsoleEntry[]>([])
   const [modal, setModal] = useState<ModalState>(null)
   const [codeOpen, setCodeOpen] = useState(false)
+  const [searchOpen, setSearchOpen] = useState(false)
+  // Back/forward through previously active tabs (Postman's ⌘[ / ⌘]).
+  const [nav, setNav] = useState<{ back: string[]; forward: string[] }>({ back: [], forward: [] })
+  const navLast = useRef<string | null>(null)
+  const navJump = useRef(false)
   // Hide the sidebar for more room on small screens or at high zoom (Postman: Ctrl+\).
   const [sidebarOpen, setSidebarOpen] = useState(() => localStorage.getItem('pm-local.sidebar') !== 'hidden')
   const toggleSidebar = () =>
@@ -142,6 +147,24 @@ export function App() {
     })
   }, [])
 
+  useEffect(() => {
+    const prev = navLast.current
+    navLast.current = state.activeKey
+    if (prev === state.activeKey) return
+    if (navJump.current) navJump.current = false
+    else if (prev) setNav((n) => ({ back: [...n.back, prev].slice(-50), forward: [] }))
+  }, [state.activeKey])
+  const live = (keys: string[]) => keys.filter((k) => state.tabs.some((t) => t.key === k) && k !== state.activeKey)
+  const navigate = (dir: 'back' | 'forward') => {
+    const from = live(nav[dir])
+    const target = from.at(-1)
+    if (!target) return
+    const other = dir === 'back' ? 'forward' : 'back'
+    navJump.current = true
+    setNav({ [dir]: from.slice(0, -1), [other]: [...nav[other], ...(state.activeKey ? [state.activeKey] : [])] } as typeof nav)
+    dispatch({ type: 'activate', key: target })
+  }
+
   const active = activeTab(state)
   const activeRequestId = active?.doc.kind === 'request' ? active.id : null
 
@@ -158,24 +181,27 @@ export function App() {
   const refreshWorkspace = () => run(async () => dispatch({ type: 'workspace', workspace: await window.api.refreshWorkspace() }))
 
   // --- opening tabs ---
-  const openWorkspace = () =>
+  const switchWorkspace = (open: () => Promise<import('../shared/format/types').WorkspaceInfo | null>) =>
     run(async () => {
-      const workspace = await window.api.openWorkspaceDialog()
+      const workspace = await open()
       if (workspace) dispatch({ type: 'workspace', workspace })
+      setSettings(await window.api.getSettings()) // recent workspaces changed
     })
-  const openRequest = (id: string) =>
+  const openWorkspace = () => switchWorkspace(() => window.api.openWorkspaceDialog())
+  /** `preview`: single click in the sidebar — reuse the preview tab (Postman). */
+  const openRequest = (id: string, preview = false) =>
     run(async () => {
       const open = stateRef.current.tabs.find((t) => t.id === id && t.doc.kind === 'request')
-      if (open) return dispatch({ type: 'activate', key: open.key })
-      dispatch({ type: 'open', id, doc: { kind: 'request', item: await window.api.readRequest(id) } })
+      if (open) return dispatch({ type: 'open', id, doc: open.doc, preview })
+      dispatch({ type: 'open', id, doc: { kind: 'request', item: await window.api.readRequest(id) }, preview })
     })
-  const openContainer = (id: string) =>
+  const openContainer = (id: string, preview = false) =>
     run(async () => {
       const open = stateRef.current.tabs.find((t) => t.id === id && t.doc.kind === 'container')
-      if (open) return dispatch({ type: 'activate', key: open.key })
+      if (open) return dispatch({ type: 'open', id, doc: open.doc, preview })
       const isCollection = id.split('/').length === 2
       const [container, variables] = await Promise.all([window.api.readContainer(id), isCollection ? window.api.readVariables(`col:${id}`) : Promise.resolve(null)])
-      dispatch({ type: 'open', id, doc: { kind: 'container', container, variables } })
+      dispatch({ type: 'open', id, doc: { kind: 'container', container, variables }, preview })
     })
   const openVariables = (scope: string, title: string) =>
     run(async () => {
@@ -217,12 +243,13 @@ export function App() {
         if (t.doc.kind === 'variables') {
           const rows = await window.api.readVariables(t.id)
           const latest = stateRef.current.tabs.find((x) => x.key === t.key)?.doc ?? t.doc
-          dispatch({ type: 'setRows', key: t.key, rows })
+          // setDoc, not setRows: a refresh is not a user edit (must not pin a preview tab).
+          dispatch({ type: 'setDoc', key: t.key, doc: { ...latest, rows } as TabDoc })
           dispatch({ type: 'saved', key: t.key, doc: { ...latest, rows } as TabDoc })
         } else if (t.doc.kind === 'container' && t.doc.variables) {
           const variables = await window.api.readVariables(`col:${t.id}`)
           const latest = stateRef.current.tabs.find((x) => x.key === t.key)?.doc ?? t.doc
-          dispatch({ type: 'setContainerVariables', key: t.key, variables })
+          dispatch({ type: 'setDoc', key: t.key, doc: { ...latest, variables } as TabDoc })
           dispatch({ type: 'saved', key: t.key, doc: { ...latest, variables } as TabDoc })
         }
       }
@@ -300,6 +327,12 @@ export function App() {
       } else if (e.key === '\\') {
         e.preventDefault()
         toggleSidebar()
+      } else if (k === 'k') {
+        e.preventDefault()
+        setSearchOpen(true)
+      } else if (e.key === '[' || e.key === ']') {
+        e.preventDefault()
+        navigate(e.key === '[' ? 'back' : 'forward')
       }
     }
     window.addEventListener('keydown', onKey)
@@ -308,8 +341,8 @@ export function App() {
 
   // --- sidebar actions ---
   const actions: SidebarActions = {
-    openRequest: (id) => void openRequest(id),
-    openContainer: (id) => void openContainer(id),
+    openRequest: (id, preview) => void openRequest(id, preview),
+    openContainer: (id, preview) => void openContainer(id, preview),
     createCollection: () =>
       void run(async () => {
         setPanel('collections')
@@ -338,6 +371,13 @@ export function App() {
         dispatch({ type: 'workspace', workspace })
       }),
     startRename: setRenamingId,
+    duplicate: (id) =>
+      void run(async () => {
+        const { workspace } = await window.api.duplicateNode(id)
+        dispatch({ type: 'workspace', workspace })
+      }),
+    toggleFavorite: (id) => dispatch({ type: 'toggleFavorite', id }),
+    openWorkspace: () => void openWorkspace(),
     remove: (id, name) =>
       void run(async () => {
         if (!window.confirm(`Delete "${name}"? This removes it from disk.`)) return
@@ -585,19 +625,24 @@ export function App() {
 
   return (
     <div className="app">
-      <header className="header">
-        <span className="brand">
-          <img src={logo} alt="" className="brand-logo" />
-          PM Local
-        </span>
-        <span className="header-spacer" />
-        <button className="btn-icon header-icon" aria-label="Settings" title="Settings" onClick={() => setModal({ kind: 'settings' })}>
-          <SettingsIcon size={18} />
-        </button>
-        <button className="btn btn-secondary" onClick={() => void openWorkspace()}>
-          <FolderOpen size={14} /> Open workspace
-        </button>
-      </header>
+      <AppHeader
+        workspace={state.workspace}
+        recent={settings?.recentWorkspaces ?? []}
+        canBack={live(nav.back).length > 0}
+        canForward={live(nav.forward).length > 0}
+        onBack={() => navigate('back')}
+        onForward={() => navigate('forward')}
+        onOpenWorkspace={() => void openWorkspace()}
+        onOpenRecent={(dir) => void switchWorkspace(() => window.api.openRecentWorkspace(dir))}
+        onSettings={() => setModal({ kind: 'settings' })}
+        searchOpen={searchOpen}
+        setSearchOpen={setSearchOpen}
+        onPick={(hit: SearchHit) => {
+          if (hit.kind === 'request') void openRequest(hit.id)
+          else if (hit.kind === 'environment') void openVariables(`env:${hit.id}`, hit.name)
+          else void openContainer(hit.id)
+        }}
+      />
 
       {state.workspace ? (
         <div className="main">
@@ -612,6 +657,7 @@ export function App() {
                     activeId={active?.id ?? null}
                     renamingId={renamingId}
                     activeEnvironment={state.activeEnvironment}
+                    favorites={state.favorites}
                     history={history}
                     mocks={mocks}
                     actions={actions}
@@ -623,6 +669,7 @@ export function App() {
                       tabs={state.tabs}
                       activeKey={state.activeKey}
                       onActivate={(key) => dispatch({ type: 'activate', key })}
+                      onPin={(key) => dispatch({ type: 'pin', key })}
                       onClose={close}
                       onCloseMany={closeMany}
                       onNew={newRequestTab}
@@ -662,6 +709,7 @@ export function App() {
         <button className={`status-btn${consoleOpen ? ' active' : ''}`} onClick={() => setConsoleOpen(!consoleOpen)} disabled={!state.workspace}>
           <Terminal size={12} /> Console
         </button>
+        <span className="spacer" />
         <button
           className="status-btn"
           disabled={!state.workspace?.collections.length}
@@ -681,8 +729,12 @@ export function App() {
         >
           <Radio size={12} /> {capture?.running ? `Capturing :${capture.port}` : 'Capture'}
         </button>
-        <span className="spacer" />
-        {state.workspace && <span className="muted">{state.workspace.root}</span>}
+        <button className="status-btn" disabled={!state.workspace} onClick={() => void openVariables('globals', 'Globals')}>
+          <Globe size={12} /> Globals
+        </button>
+        <button className="status-btn" disabled={!state.workspace} onClick={() => setModal({ kind: 'cookies' })}>
+          <Cookie size={12} /> Cookies
+        </button>
       </footer>
 
       {modal?.kind === 'import' && <ImportModal onClose={() => setModal(null)} onImported={(r) => void onImported(r)} />}

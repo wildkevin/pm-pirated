@@ -8,6 +8,7 @@ import {
   createFolder,
   createRequest,
   deleteNode,
+  duplicateNode,
   initWorkspace,
   isWorkspace,
   loadChain,
@@ -235,5 +236,28 @@ describe('writeFileAtomic', () => {
     await writeFileAtomic(f, 'two')
     expect(await readFile(f, 'utf8')).toBe('two')
     expect(await readdir(root)).toEqual(['x.json'])
+  })
+})
+
+describe('duplicate', () => {
+  it('copies requests, folders and collections next to the original, named "<name> Copy"', async () => {
+    await initWorkspace(root)
+    const col = await createCollection(root, 'Shop')
+    const a = await createRequest(root, col, 'List')
+    await createRequest(root, col, 'Last')
+    const copy = await duplicateNode(root, a)
+    expect((await readRequest(root, copy)).name).toBe('List Copy')
+    const folder = await createFolder(root, col, 'Admin')
+    await createRequest(root, folder, 'Inner')
+    const folderCopy = await duplicateNode(root, folder)
+    let info = await openWorkspace(root)
+    expect(names(info.collections[0].children)).toEqual(['List', 'List Copy', 'Last', 'Admin', 'Admin Copy'])
+    expect(names(info.collections[0].children!.find((n) => n.id === folderCopy)!.children)).toEqual(['Inner'])
+
+    const colCopy = await duplicateNode(root, col)
+    info = await openWorkspace(root)
+    expect(names(info.collections)).toEqual(['Shop', 'Shop Copy'])
+    const ids = await Promise.all([col, colCopy].map(async (c) => JSON.parse(await readFile(join(root, c, 'collection.json'), 'utf8')).info._postman_id))
+    expect(ids[0]).not.toBe(ids[1])
   })
 })

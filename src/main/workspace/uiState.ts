@@ -16,6 +16,7 @@ export async function readUiState(root: string): Promise<UiState> {
       activeEnvironment: typeof s.activeEnvironment === 'string' ? s.activeEnvironment : null,
       tabs: Array.isArray(s.tabs) ? s.tabs.filter((t: unknown) => t && typeof t === 'object' && 'item' in (t as object)) : [],
       activeIndex: Number.isInteger(s.activeIndex) ? s.activeIndex : -1,
+      favorites: Array.isArray(s.favorites) ? s.favorites.filter((f: unknown) => typeof f === 'string') : [],
     }
   } catch {
     return EMPTY_UI_STATE

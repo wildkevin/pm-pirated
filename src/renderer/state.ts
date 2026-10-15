@@ -28,6 +28,8 @@ export interface Tab {
   saved: string
   sendId?: string
   report?: RunReport
+  /** Opened by a single click in the sidebar (italic title): the next single click replaces it. Editing or double-clicking pins it. */
+  preview?: boolean
 }
 
 export interface State {
@@ -37,6 +39,8 @@ export interface State {
   activeEnvironment: string | null
   error: string | null
   nextKey: number
+  /** Favorited collection ids. */
+  favorites: string[]
 }
 
 export const initialState: State = {
@@ -46,6 +50,7 @@ export const initialState: State = {
   activeEnvironment: null,
   error: null,
   nextKey: 1,
+  favorites: [],
 }
 
 export type Action =
@@ -53,12 +58,14 @@ export type Action =
   | { type: 'restore'; ui: UiState }
   | { type: 'environment'; id: string | null }
   // Node-level actions (addressed by id)
-  | { type: 'open'; id: string; doc: TabDoc }
+  | { type: 'open'; id: string; doc: TabDoc; preview?: boolean }
   | { type: 'openDraft'; item: PmItem }
   | { type: 'renamed'; id: string; newId: string; name: string }
   | { type: 'removed'; id: string }
   // Tab-level actions (addressed by tab key)
   | { type: 'activate'; key: string }
+  | { type: 'pin'; key: string }
+  | { type: 'toggleFavorite'; id: string }
   | { type: 'close'; key: string }
   | { type: 'closeMany'; keys: string[] }
   /** A patch, not a full item: a stale render must not overwrite fields changed meanwhile (e.g. the name). */
@@ -101,10 +108,17 @@ function closeTabs(s: State, gone: (t: Tab) => boolean): State {
 /** True for a node id at or below `node` (paths), or the collection's variable scope. */
 const under = (id: string | null, node: string) => id !== null && (id === node || id.startsWith(`${node}/`) || id === `col:${node}`)
 
-function addTab(s: State, id: string | null, doc: TabDoc, saved = stableStringify(doc)): State {
+function addTab(s: State, id: string | null, doc: TabDoc, saved = stableStringify(doc), preview = false): State {
   const key = `tab-${s.nextKey}`
-  return { ...s, tabs: [...s.tabs, { key, id, doc, saved }], activeKey: key, nextKey: s.nextKey + 1 }
+  const tab: Tab = { key, id, doc, saved, ...(preview ? { preview } : {}) }
+  // Postman: a new preview tab takes the place of the current one (unless that has unsaved edits or is sending).
+  const old = preview ? s.tabs.findIndex((t) => t.preview && !isDirty(t) && !t.sendId) : -1
+  const tabs = old === -1 ? [...s.tabs, tab] : s.tabs.map((t, i) => (i === old ? tab : t))
+  return { ...s, tabs, activeKey: key, nextKey: s.nextKey + 1 }
 }
+
+/** User edits turn a preview tab into a normal one. */
+const pinned = (t: Tab): Tab => (t.preview ? { ...t, preview: false } : t)
 
 function rename(doc: TabDoc, name: string): TabDoc {
   if (doc.kind === 'request') return { ...doc, item: { ...doc.item, name } }
@@ -123,13 +137,15 @@ export function reducer(s: State, a: Action): State {
       let next: State = { ...s, tabs: [], activeKey: null, activeEnvironment: a.ui.activeEnvironment }
       for (const t of a.ui.tabs) next = addTab(next, t.id, { kind: 'request', item: t.item }, t.saved ?? stableStringify({ kind: 'request', item: t.item }))
       const active = next.tabs[a.ui.activeIndex] ?? next.tabs.at(-1)
-      return { ...next, activeKey: active?.key ?? null }
+      return { ...next, activeKey: active?.key ?? null, favorites: a.ui.favorites ?? [] }
     }
     case 'environment':
       return { ...s, activeEnvironment: a.id }
     case 'open': {
       const existing = s.tabs.find((t) => t.id === a.id && t.doc.kind === a.doc.kind)
-      return existing ? { ...s, activeKey: existing.key } : addTab(s, a.id, a.doc)
+      if (!existing) return addTab(s, a.id, a.doc, undefined, a.preview)
+      // Opening an already-open node normally (double-click) pins its preview tab.
+      return { ...(a.preview ? s : mapTab(s, (t) => t.key === existing.key, pinned)), activeKey: existing.key }
     }
     case 'openDraft':
       return addTab(s, null, { kind: 'request', item: a.item })
@@ -143,14 +159,19 @@ export function reducer(s: State, a: Action): State {
           return { ...t, doc, saved: stableStringify(rename(JSON.parse(t.saved), a.name)) }
         },
       )
-      return mapTab(
+      const renamed = mapTab(
         moved,
         (t) => under(t.id, a.id),
         (t) => ({ ...t, id: t.id!.startsWith('col:') ? `col:${a.newId}` : a.newId + t.id!.slice(a.id.length) }),
       )
+      return { ...renamed, favorites: s.favorites.map((f) => (f === a.id ? a.newId : f)) }
     }
     case 'removed':
-      return closeTabs(s, (t) => under(t.id, a.id))
+      return { ...closeTabs(s, (t) => under(t.id, a.id)), favorites: s.favorites.filter((f) => f !== a.id) }
+    case 'pin':
+      return mapTab(s, (t) => t.key === a.key, pinned)
+    case 'toggleFavorite':
+      return { ...s, favorites: s.favorites.includes(a.id) ? s.favorites.filter((f) => f !== a.id) : [...s.favorites, a.id] }
     case 'activate':
       return { ...s, activeKey: a.key }
     case 'close':
@@ -163,7 +184,7 @@ export function reducer(s: State, a: Action): State {
         (t) => t.key === a.key && t.doc.kind === 'request',
         (t) => {
           const doc = t.doc as Extract<TabDoc, { kind: 'request' }>
-          return { ...t, doc: { ...doc, item: { ...doc.item, request: { ...doc.item.request, ...a.patch } } } }
+          return { ...pinned(t), doc: { ...doc, item: { ...doc.item, request: { ...doc.item.request, ...a.patch } } } }
         },
       )
     case 'editItem':
@@ -172,7 +193,7 @@ export function reducer(s: State, a: Action): State {
         (t) => t.key === a.key && t.doc.kind === 'request',
         (t) => {
           const doc = t.doc as Extract<TabDoc, { kind: 'request' }>
-          return { ...t, doc: { ...doc, item: { ...doc.item, ...a.patch } } }
+          return { ...pinned(t), doc: { ...doc, item: { ...doc.item, ...a.patch } } }
         },
       )
     case 'patchContainer':
@@ -181,13 +202,13 @@ export function reducer(s: State, a: Action): State {
         (t) => t.key === a.key && t.doc.kind === 'container',
         (t) => {
           const doc = t.doc as Extract<TabDoc, { kind: 'container' }>
-          return { ...t, doc: { ...doc, container: { ...doc.container, ...a.patch } } }
+          return { ...pinned(t), doc: { ...doc, container: { ...doc.container, ...a.patch } } }
         },
       )
     case 'setContainerVariables':
-      return mapTab(s, (t) => t.key === a.key && t.doc.kind === 'container', (t) => ({ ...t, doc: { ...(t.doc as Extract<TabDoc, { kind: 'container' }>), variables: a.variables } }))
+      return mapTab(s, (t) => t.key === a.key && t.doc.kind === 'container', (t) => ({ ...pinned(t), doc: { ...(t.doc as Extract<TabDoc, { kind: 'container' }>), variables: a.variables } }))
     case 'setRows':
-      return mapTab(s, (t) => t.key === a.key && t.doc.kind === 'variables', (t) => ({ ...t, doc: { ...(t.doc as Extract<TabDoc, { kind: 'variables' }>), rows: a.rows } }))
+      return mapTab(s, (t) => t.key === a.key && t.doc.kind === 'variables', (t) => ({ ...pinned(t), doc: { ...(t.doc as Extract<TabDoc, { kind: 'variables' }>), rows: a.rows } }))
     case 'setDoc':
       return mapTab(s, (t) => t.key === a.key, (t) => ({ ...t, doc: a.doc }))
     case 'openLoad': {
@@ -209,7 +230,7 @@ export function reducer(s: State, a: Action): State {
         (t) => ({ ...t, saved: stableStringify(a.doc), ...(a.id !== undefined ? { id: a.id, doc: a.doc } : {}) }),
       )
     case 'sendStart':
-      return mapTab(s, (t) => t.key === a.key, (t) => ({ ...t, sendId: a.sendId }))
+      return mapTab(s, (t) => t.key === a.key, (t) => ({ ...pinned(t), sendId: a.sendId }))
     case 'sendDone':
       // Ignore results of a send that was superseded or cancelled.
       return mapTab(
@@ -229,6 +250,7 @@ export function toUiState(s: State): UiState {
     activeEnvironment: s.activeEnvironment,
     tabs: requestTabs.map((t) => ({ id: t.id, item: (t.doc as Extract<TabDoc, { kind: 'request' }>).item, saved: t.saved })),
     activeIndex: requestTabs.findIndex((t) => t.key === s.activeKey),
+    favorites: s.favorites,
   }
 }
 

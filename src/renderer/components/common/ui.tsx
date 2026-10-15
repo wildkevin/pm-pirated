@@ -1,6 +1,6 @@
 // Small shared UI pieces: modal, toggle, key/value table, dropdown menu.
-import { Trash2, X } from 'lucide-react'
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { ChevronRight, Trash2, X } from 'lucide-react'
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import type { PmFormParam, PmKeyValue } from '../../../shared/format/types'
 import { fromBulk, toBulk } from '../../lib/misc'
 
@@ -37,11 +37,21 @@ export function Toggle({ checked, onChange, label }: { checked: boolean; onChang
   )
 }
 
-/** Dropdown menu anchored to a button; closes on outside click or Escape. */
-export function Menu({ items, onClose, style }: { items: { label: string; onClick(): void; danger?: boolean }[]; onClose(): void; style: React.CSSProperties }) {
+export type MenuItem =
+  | { label: string; onClick?(): void; danger?: boolean; shortcut?: string; icon?: ReactNode; children?: MenuItem[]; disabled?: boolean }
+  | 'separator'
+
+/**
+ * Postman-style menu at a fixed position: separators, shortcut hints, icons, `›` submenus and an optional
+ * search box. Closes on outside click or Escape; keeps itself inside the window.
+ */
+export function Menu({ items, onClose, style, searchable, label }: { items: MenuItem[]; onClose(): void; style: React.CSSProperties; searchable?: boolean; label?: string }) {
   const ref = useRef<HTMLDivElement>(null)
+  const [query, setQuery] = useState('')
+  const [sub, setSub] = useState<{ index: number; top: number; left: number } | null>(null)
+  const [pos, setPos] = useState(style)
   useEffect(() => {
-    const onDown = (e: MouseEvent) => !ref.current?.contains(e.target as Node) && onClose()
+    const onDown = (e: MouseEvent) => !(e.target as Element).closest?.('.menu') && onClose()
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
     document.addEventListener('mousedown', onDown)
     document.addEventListener('keydown', onKey)
@@ -50,22 +60,55 @@ export function Menu({ items, onClose, style }: { items: { label: string; onClic
       document.removeEventListener('keydown', onKey)
     }
   }, [onClose])
+  // Flip/shift into the window when it would overflow.
+  useLayoutEffect(() => {
+    const r = ref.current?.getBoundingClientRect()
+    if (!r) return
+    const top = typeof style.top === 'number' && r.bottom > innerHeight - 4 ? Math.max(4, innerHeight - r.height - 4) : style.top
+    const left = typeof style.left === 'number' && r.right > innerWidth - 4 ? Math.max(4, innerWidth - r.width - 4) : style.left
+    if (top !== style.top || left !== style.left) setPos({ ...style, top, left })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+  const q = query.trim().toLowerCase()
+  const shown = q ? items.filter((it) => it !== 'separator' && it.label.toLowerCase().includes(q)) : items
+  const open = sub !== null ? shown[sub.index] : undefined
   return (
-    <div ref={ref} className="menu" role="menu" style={style}>
-      {items.map((it) => (
-        <button
-          key={it.label}
-          role="menuitem"
-          className={`menu-item${it.danger ? ' danger' : ''}`}
-          onClick={() => {
-            onClose()
-            it.onClick()
-          }}
-        >
-          {it.label}
-        </button>
-      ))}
-    </div>
+    <>
+      <div ref={ref} className="menu" role="menu" aria-label={label} style={pos}>
+        {searchable && (
+          <input className="menu-search" placeholder="Search..." aria-label="Search menu" autoFocus value={query} onChange={(e) => setQuery(e.target.value)} />
+        )}
+        {shown.map((it, i) =>
+          it === 'separator' ? (
+            <div key={`sep-${i}`} className="menu-sep" role="separator" />
+          ) : (
+            <button
+              key={it.label}
+              role="menuitem"
+              aria-haspopup={it.children ? 'menu' : undefined}
+              disabled={it.disabled}
+              className={`menu-item${it.danger ? ' danger' : ''}${sub?.index === i ? ' open' : ''}`}
+              onMouseEnter={(e) => {
+                const r = e.currentTarget.getBoundingClientRect()
+                setSub(it.children ? { index: i, top: r.top - 5, left: r.right + 2 } : null)
+              }}
+              onClick={() => {
+                if (it.children) return
+                onClose()
+                it.onClick?.()
+              }}
+            >
+              {it.icon && <span className="menu-icon">{it.icon}</span>}
+              <span className="menu-label">{it.label}</span>
+              {it.shortcut && <span className="menu-shortcut">{it.shortcut}</span>}
+              {it.children && <ChevronRight size={14} className="menu-shortcut" />}
+            </button>
+          ),
+        )}
+        {searchable && shown.length === 0 && <div className="menu-empty">No results</div>}
+      </div>
+      {open && open !== 'separator' && open.children && sub && <Menu items={open.children} onClose={onClose} style={{ top: sub.top, left: sub.left }} />}
+    </>
   )
 }
 

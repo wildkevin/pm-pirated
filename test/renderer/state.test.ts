@@ -40,6 +40,35 @@ describe('tabs', () => {
     expect(activeId(s)).toBe('a')
   })
 
+  it('preview tabs: a single click replaces the preview, double-click / edits / send pin it', () => {
+    const preview = (s: State, id: string) => reducer(s, { type: 'open', id, doc: req(id), preview: true })
+    let s = withTabs('pinned')
+    s = preview(s, 'a')
+    s = preview(s, 'b') // replaces a, in place
+    expect(s.tabs.map((t) => [t.id, !!t.preview])).toEqual([['pinned', false], ['b', true]])
+    expect(activeId(s)).toBe('b')
+    s = reducer(s, { type: 'open', id: 'b', doc: req('b') }) // double-click
+    expect(s.tabs[1].preview).toBe(false)
+    s = preview(s, 'c')
+    s = reducer(s, { type: 'edit', key: keyOf(s, 'c'), patch: { url: 'http://x' } })
+    s = preview(s, 'd') // c has edits now: kept, d added
+    expect(s.tabs.map((t) => t.id)).toEqual(['pinned', 'b', 'c', 'd'])
+    s = reducer(s, { type: 'sendStart', key: keyOf(s, 'd'), sendId: '1' })
+    s = preview(s, 'e')
+    expect(s.tabs.map((t) => t.id)).toEqual(['pinned', 'b', 'c', 'd', 'e'])
+    s = reducer(s, { type: 'pin', key: keyOf(s, 'e') })
+    expect(s.tabs.some((t) => t.preview)).toBe(false)
+  })
+
+  it('favorites follow renames and deletes and are saved with the UI state', () => {
+    let s = reducer(withTabs(), { type: 'toggleFavorite', id: 'collections/A' })
+    s = reducer(s, { type: 'renamed', id: 'collections/A', newId: 'collections/B', name: 'B' })
+    expect(s.favorites).toEqual(['collections/B'])
+    expect(toUiState(s).favorites).toEqual(['collections/B'])
+    s = reducer(s, { type: 'removed', id: 'collections/B' })
+    expect(s.favorites).toEqual([])
+  })
+
   it('tracks dirty state across edits and saves', () => {
     let s = withTabs('a')
     const key = keyOf(s, 'a')

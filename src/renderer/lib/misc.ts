@@ -53,3 +53,6 @@ export function splitVariables(text: string): { text: string; variable?: string 
 
 /** Dynamic variables are always defined (resolved at send time). */
 export const isDynamicVariable = (name: string) => name.startsWith('$')
+
+/** Modifier shown in shortcut hints: ⌘ on macOS, Ctrl+ elsewhere (like Postman). */
+export const mod = typeof navigator !== 'undefined' && /Mac/.test(navigator.platform) ? '⌘' : 'Ctrl+'

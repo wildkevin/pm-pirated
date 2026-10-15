@@ -1,24 +1,29 @@
-import { Check, ChevronDown, ChevronRight, Clock, Folder, Globe, Layers, MoreHorizontal, Plus, Server, Trash2 } from 'lucide-react'
-import { useEffect, useRef, useState, type ReactElement } from 'react'
+import { Box, Check, ChevronDown, ChevronRight, Clock, Folder, Import, ListFilter, MoreHorizontal, Plus, Star, X } from 'lucide-react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { EnvironmentInfo, TreeNode, WorkspaceInfo } from '../../shared/format/types'
 import type { HistoryEntry } from '../../shared/ipc'
 import type { MockInfo } from '../../shared/mock'
 import { rawUrl } from '../../shared/format/url'
 import { methodClass, methodLabel } from '../lib/methods'
-import { dayLabel, groupBy } from '../lib/misc'
-import { Menu } from './common/ui'
+import { dayLabel, groupBy, mod } from '../lib/misc'
+import { Menu, type MenuItem } from './common/ui'
 
+/** Which sidebar view (Workspace items or History) to show, and which section to reveal. */
 export type Panel = 'collections' | 'environments' | 'history' | 'mocks'
+type Section = Exclude<Panel, 'history'>
 
 export interface SidebarActions {
-  openRequest(id: string): void
-  openContainer(id: string): void
+  /** `preview`: single click — reuses the preview tab. */
+  openRequest(id: string, preview?: boolean): void
+  openContainer(id: string, preview?: boolean): void
   createCollection(): void
   createFolder(parentId: string): void
   createRequest(parentId: string): void
   rename(id: string, name: string): void
   startRename(id: string | null): void
+  duplicate(id: string): void
   remove(id: string, name: string): void
+  toggleFavorite(id: string): void
   exportCollection(id: string): void
   runCollection(id: string): void
   loadTest(id: string): void
@@ -38,9 +43,10 @@ export interface SidebarActions {
   startMock(id: string): void
   stopMock(id: string): void
   deleteMock(id: string, name: string): void
-  // header
+  // toolbar
   newRequest(): void
   openImport(): void
+  openWorkspace(): void
 }
 
 interface Props {
@@ -50,85 +56,183 @@ interface Props {
   activeId: string | null
   renamingId: string | null
   activeEnvironment: string | null
+  favorites: string[]
   history: HistoryEntry[]
   mocks: MockInfo[]
   actions: SidebarActions
 }
 
+type MenuState = { x: number; y: number; items: MenuItem[]; searchable?: boolean } | null
+
+const SECTIONS: { id: Section; title: string }[] = [
+  { id: 'collections', title: 'Collections' },
+  { id: 'environments', title: 'Environments' },
+  { id: 'mocks', title: 'Mocks' },
+]
+
+function loadOpenSections(): Set<Section> {
+  try {
+    const saved = JSON.parse(localStorage.getItem('pm-local.sections') ?? '')
+    if (Array.isArray(saved)) return new Set(saved)
+  } catch {
+    // first run
+  }
+  return new Set(['collections'])
+}
+
 export function Sidebar(p: Props) {
-  const [newMenu, setNewMenu] = useState<DOMRect | null>(null)
-  const rail: { id: Panel; label: string; icon: ReactElement }[] = [
-    { id: 'collections', label: 'Collections', icon: <Layers size={18} /> },
-    { id: 'environments', label: 'Environments', icon: <Globe size={18} /> },
-    { id: 'history', label: 'History', icon: <Clock size={18} /> },
-    { id: 'mocks', label: 'Mock Servers', icon: <Server size={18} /> },
+  const [filter, setFilter] = useState('')
+  const [menu, setMenu] = useState<MenuState>(null)
+  const [open, setOpen] = useState(loadOpenSections)
+  const view = p.panel === 'history' ? 'history' : 'workspace'
+
+  const setSections = (next: Set<Section>) => {
+    localStorage.setItem('pm-local.sections', JSON.stringify([...next]))
+    setOpen(next)
+  }
+  // Reveal the section asked for (e.g. after creating an environment).
+  useEffect(() => {
+    if (p.panel !== 'history' && !open.has(p.panel)) setSections(new Set([...open, p.panel]))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [p.panel])
+
+  const showMenu = (e: React.MouseEvent, items: MenuItem[], at: 'pointer' | 'below' = 'below', searchable = false) => {
+    e.preventDefault()
+    e.stopPropagation()
+    const r = e.currentTarget.getBoundingClientRect()
+    setMenu(at === 'pointer' ? { x: e.clientX, y: e.clientY, items, searchable } : { x: r.left, y: r.bottom + 2, items, searchable })
+  }
+
+  const createItems: MenuItem[] = [
+    { label: 'HTTP', icon: <span className="menu-http">HTTP</span>, onClick: p.actions.newRequest },
+    'separator',
+    { label: 'Collection', icon: <Box size={14} />, onClick: p.actions.createCollection },
+    { label: 'Environment', icon: <Check size={14} />, onClick: p.actions.createEnvironment },
+    { label: 'Mock Server', icon: <MockIcon />, onClick: () => p.actions.createMock() },
   ]
+
   return (
-    <aside className="sidebar">
-      <div className="sidebar-head">
-        <span className="sidebar-title" title={p.workspace.root}>
-          {p.workspace.name}
-        </span>
-        <span className="sidebar-head-actions">
-          <button className="btn btn-small" onClick={(e) => setNewMenu(e.currentTarget.getBoundingClientRect())}>
-            New
+    <aside className="sidebar" aria-label="Sidebar">
+      <div className="sb-tabs" role="tablist" aria-label="Sidebar views">
+        <SbTab label="Collections, environments and mocks" active={view === 'workspace'} onClick={() => p.setPanel('collections')}>
+          <Box size={16} />
+        </SbTab>
+        <SbTab label="History" active={view === 'history'} onClick={() => p.setPanel('history')}>
+          <Clock size={16} />
+        </SbTab>
+      </div>
+
+      <div className="sb-toolbar">
+        <label className="sb-filter">
+          <ListFilter size={12} />
+          <input aria-label={view === 'history' ? 'Filter history' : 'Filter sidebar'} value={filter} onChange={(e) => setFilter(e.target.value)} />
+          {filter && (
+            <button className="btn-icon" aria-label="Clear filter" onClick={() => setFilter('')}>
+              <X size={12} />
+            </button>
+          )}
+        </label>
+        {view === 'workspace' ? (
+          <>
+            <button className="btn-icon sb-tool" aria-label="Create new" title="Create new" onClick={(e) => showMenu(e, createItems, 'below', true)}>
+              <Plus size={14} />
+            </button>
+            <button className="btn-icon sb-tool" aria-label="Import" title="Import" onClick={p.actions.openImport}>
+              <Import size={14} />
+            </button>
+            <button
+              className="btn-icon sb-tool"
+              aria-label="Sidebar options"
+              title="More"
+              onClick={(e) =>
+                showMenu(e, [
+                  { label: 'Open workspace…', onClick: p.actions.openWorkspace },
+                  { label: 'Collapse all sections', onClick: () => setSections(new Set()) },
+                ])
+              }
+            >
+              <MoreHorizontal size={14} />
+            </button>
+          </>
+        ) : (
+          <button
+            className="btn-icon sb-tool"
+            aria-label="History options"
+            title="More"
+            onClick={(e) => showMenu(e, [{ label: 'Clear all history', danger: true, disabled: !p.history.length, onClick: () => window.confirm('Clear all history?') && p.actions.deleteHistory() }])}
+          >
+            <MoreHorizontal size={14} />
           </button>
-          <button className="btn btn-small" onClick={p.actions.openImport}>
-            Import
-          </button>
-        </span>
-        {newMenu && (
-          <Menu
-            style={{ left: newMenu.left, top: newMenu.bottom + 4 }}
-            onClose={() => setNewMenu(null)}
-            items={[
-              { label: 'HTTP Request', onClick: p.actions.newRequest },
-              { label: 'Collection', onClick: p.actions.createCollection },
-              { label: 'Environment', onClick: p.actions.createEnvironment },
-              { label: 'Mock Server', onClick: () => p.actions.createMock() },
-            ]}
-          />
         )}
       </div>
-      <div className="sidebar-main">
-        <nav className="sidebar-rail" aria-label="Sidebar">
-          {rail.map((r) => (
-            <button key={r.id} className={`rail-item${p.panel === r.id ? ' active' : ''}`} aria-current={p.panel === r.id ? 'page' : undefined} onClick={() => p.setPanel(r.id)}>
-              {r.icon}
-              <span>{r.label}</span>
-            </button>
-          ))}
-        </nav>
-        <div className="sidebar-panel">
-          {p.panel === 'collections' && <CollectionsPanel {...p} />}
-          {p.panel === 'environments' && <EnvironmentsPanel {...p} />}
-          {p.panel === 'history' && <HistoryPanel {...p} />}
-          {p.panel === 'mocks' && <MocksPanel {...p} />}
+
+      {view === 'workspace' ? (
+        <div className="sb-sections">
+          {SECTIONS.map((s) => {
+            const expanded = open.has(s.id) || !!filter
+            return (
+              <section key={s.id} className={`sb-section${expanded ? ' open' : ''}`} aria-label={s.title}>
+                <button
+                  className="sb-section-head"
+                  aria-expanded={expanded}
+                  onClick={() => {
+                    const next = new Set(open)
+                    if (!next.delete(s.id)) next.add(s.id)
+                    setSections(next)
+                  }}
+                >
+                  {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                  <span>{s.title}</span>
+                </button>
+                {expanded && (
+                  <div className="sb-section-body">
+                    {s.id === 'collections' && <CollectionsTree {...p} filter={filter} showMenu={showMenu} />}
+                    {s.id === 'environments' && <EnvironmentList {...p} filter={filter} showMenu={showMenu} />}
+                    {s.id === 'mocks' && <MockList {...p} filter={filter} showMenu={showMenu} />}
+                  </div>
+                )}
+              </section>
+            )
+          })}
         </div>
-      </div>
+      ) : (
+        <HistoryList {...p} filter={filter} showMenu={showMenu} />
+      )}
+      {menu && <Menu items={menu.items} style={{ left: menu.x, top: menu.y }} onClose={() => setMenu(null)} searchable={menu.searchable} label={menu.searchable ? 'Create new' : undefined} />}
     </aside>
   )
 }
 
-function PanelHead({ title, onAdd, addLabel, extra }: { title: string; onAdd?(): void; addLabel?: string; extra?: ReactElement }) {
+function SbTab({ label, active, onClick, children }: { label: string; active: boolean; onClick(): void; children: ReactNode }) {
   return (
-    <div className="panel-head">
-      <span className="panel-title">{title}</span>
-      {extra}
-      {onAdd && (
-        <button className="btn-icon" aria-label={addLabel} title={addLabel} onClick={onAdd}>
-          <Plus size={16} />
-        </button>
-      )}
-    </div>
+    <button role="tab" aria-selected={active} aria-label={label} title={label} className={`sb-tab${active ? ' active' : ''}`} onClick={onClick}>
+      {children}
+    </button>
   )
 }
 
+function MockIcon() {
+  return <span className="menu-mock">◫</span>
+}
+
+type ListProps = Props & { filter: string; showMenu(e: React.MouseEvent, items: MenuItem[], at?: 'pointer' | 'below'): void }
+
+const matches = (name: string, filter: string) => name.toLowerCase().includes(filter.trim().toLowerCase())
+
 // ---------------- Collections ----------------
 
-function CollectionsPanel({ workspace, activeId, renamingId, actions }: Props) {
+/** Nodes matching the filter, plus their ancestors (Postman keeps the path visible). */
+function filterTree(nodes: TreeNode[], filter: string): TreeNode[] {
+  if (!filter.trim()) return nodes
+  return nodes.flatMap((n) => {
+    if (matches(n.name, filter)) return [n]
+    const children = filterTree(n.children ?? [], filter)
+    return children.length ? [{ ...n, children }] : []
+  })
+}
+
+function CollectionsTree({ workspace, activeId, renamingId, favorites, actions, filter, showMenu }: ListProps) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
-  const [menu, setMenu] = useState<{ node: TreeNode; x: number; y: number } | null>(null)
 
   // Reveal newly created / renamed / opened nodes by expanding their ancestors.
   useEffect(() => {
@@ -149,62 +253,95 @@ function CollectionsPanel({ workspace, activeId, renamingId, actions }: Props) {
       return next
     })
 
-  const rows: ReactElement[] = []
+  const menuFor = (n: TreeNode): MenuItem[] => {
+    const edit: MenuItem[] = [
+      { label: 'Rename', shortcut: `${mod}E`, onClick: () => actions.startRename(n.id) },
+      { label: 'Duplicate', shortcut: `${mod}D`, onClick: () => actions.duplicate(n.id) },
+      { label: 'Delete', danger: true, shortcut: 'Del', onClick: () => actions.remove(n.id, n.name) },
+    ]
+    if (n.kind === 'request')
+      return [{ label: 'Open in new tab', onClick: () => actions.openRequest(n.id, false) }, 'separator', ...edit]
+    return [
+      { label: 'Add request', onClick: () => actions.createRequest(n.id) },
+      { label: 'Add folder', onClick: () => actions.createFolder(n.id) },
+      'separator',
+      { label: 'Run', onClick: () => actions.runCollection(n.id) },
+      'separator',
+      ...edit,
+      'separator',
+      {
+        label: 'More',
+        children: [
+          { label: n.kind === 'collection' ? 'Collection settings' : 'Folder settings', onClick: () => actions.openContainer(n.id, false) },
+          { label: 'Mock', onClick: () => actions.createMock(n.id) },
+          { label: 'Run performance test', onClick: () => actions.loadTest(n.id) },
+          ...(n.kind === 'collection' ? [{ label: 'Export', onClick: () => actions.exportCollection(n.id) }] : []),
+        ],
+      },
+    ]
+  }
+
+  const filtering = !!filter.trim()
+  const collections = filterTree(workspace.collections, filter)
+  // Favorites first (Postman pins starred collections to the top), otherwise by name.
+  const sorted = [...collections.filter((c) => favorites.includes(c.id)), ...collections.filter((c) => !favorites.includes(c.id))]
+  const rows: ReactNode[] = []
   const walk = (nodes: TreeNode[], depth: number) => {
     for (const node of nodes) {
+      const isOpen = filtering || expanded.has(node.id)
       rows.push(
         <TreeRow
           key={node.id}
           node={node}
           depth={depth}
-          open={expanded.has(node.id)}
+          open={isOpen}
           active={node.id === activeId}
           renaming={node.id === renamingId}
+          favorite={favorites.includes(node.id)}
           onToggle={() => toggle(node.id)}
-          onClick={() => {
-            if (node.kind === 'request') return actions.openRequest(node.id)
+          onOpen={(preview) => {
+            if (node.kind === 'request') return actions.openRequest(node.id, preview)
             if (!expanded.has(node.id)) toggle(node.id)
-            actions.openContainer(node.id)
+            actions.openContainer(node.id, preview)
           }}
-          onMenu={(x, y) => setMenu({ node, x, y })}
+          onMenu={(e, at) => showMenu(e, menuFor(node), at)}
+          onAdd={() => actions.createRequest(node.id)}
+          onFavorite={() => actions.toggleFavorite(node.id)}
           onRename={(name) => (name && name !== node.name ? actions.rename(node.id, name) : actions.startRename(null))}
-          onStartRename={() => actions.startRename(node.id)}
+          onKey={(e) => {
+            const k = e.key.toLowerCase()
+            if (renamingId) return
+            if ((e.ctrlKey || e.metaKey) && k === 'e') actions.startRename(node.id)
+            else if ((e.ctrlKey || e.metaKey) && k === 'd') actions.duplicate(node.id)
+            else if (e.key === 'F2') actions.startRename(node.id)
+            else if (e.key === 'Delete' || ((e.ctrlKey || e.metaKey) && e.key === 'Backspace')) actions.remove(node.id, node.name)
+            else if (e.key === 'Enter') return void (node.kind === 'request' ? actions.openRequest(node.id, false) : toggle(node.id))
+            else return
+            e.preventDefault()
+            e.stopPropagation()
+          }}
         />,
       )
-      if (node.children && expanded.has(node.id)) walk(node.children, depth + 1)
+      if (node.children && isOpen) walk(node.children, depth + 1)
     }
   }
-  walk(workspace.collections, 0)
+  walk(sorted, 0)
 
-  const n = menu?.node
   return (
-    <>
-      <PanelHead title="Collections" onAdd={actions.createCollection} addLabel="New collection" />
-      <div className="tree" role="tree">
-        {rows.length ? rows : <div className="tree-empty">Create a collection for your requests. Click + or use Import.</div>}
-      </div>
-      {menu && n && (
-        <Menu
-          style={{ left: menu.x, top: menu.y }}
-          onClose={() => setMenu(null)}
-          items={[
-            ...(n.kind !== 'request'
-              ? [
-                  { label: 'Add request', onClick: () => actions.createRequest(n.id) },
-                  { label: 'Add folder', onClick: () => actions.createFolder(n.id) },
-                  { label: 'Edit', onClick: () => actions.openContainer(n.id) },
-                  { label: 'Run', onClick: () => actions.runCollection(n.id) },
-                  { label: 'Performance test', onClick: () => actions.loadTest(n.id) },
-                  { label: 'Mock', onClick: () => actions.createMock(n.id) },
-                ]
-              : []),
-            ...(n.kind === 'collection' ? [{ label: 'Export', onClick: () => actions.exportCollection(n.id) }] : []),
-            { label: 'Rename', onClick: () => actions.startRename(n.id) },
-            { label: 'Delete', danger: true, onClick: () => actions.remove(n.id, n.name) },
-          ]}
-        />
+    <div className="tree" role="tree" aria-label="Collections">
+      {rows.length ? (
+        rows
+      ) : filtering ? (
+        <div className="tree-empty">No collections match "{filter}".</div>
+      ) : (
+        <div className="tree-empty">
+          Create a collection for your requests.{' '}
+          <button className="link-btn" onClick={actions.createCollection}>
+            Create collection
+          </button>
+        </div>
       )}
-    </>
+    </div>
   )
 }
 
@@ -214,41 +351,48 @@ interface RowProps {
   open: boolean
   active: boolean
   renaming: boolean
-  onClick(): void
+  favorite: boolean
+  onOpen(preview: boolean): void
   onToggle(): void
-  onMenu(x: number, y: number): void
+  onMenu(e: React.MouseEvent, at: 'pointer' | 'below'): void
+  onAdd(): void
+  onFavorite(): void
   onRename(name: string): void
-  onStartRename(): void
+  onKey(e: React.KeyboardEvent): void
 }
 
-function TreeRow({ node, depth, open, active, renaming, onClick, onToggle, onMenu, onRename, onStartRename }: RowProps) {
+function TreeRow({ node, depth, open, active, renaming, favorite, onOpen, onToggle, onMenu, onAdd, onFavorite, onRename, onKey }: RowProps) {
   const Chevron = open ? ChevronDown : ChevronRight
   return (
     <div
       className={`tree-row${active ? ' active' : ''}`}
       data-testid="tree-row"
       role="treeitem"
+      tabIndex={0}
+      aria-selected={active}
       aria-expanded={node.kind === 'request' ? undefined : open}
-      style={{ paddingLeft: 8 + depth * 16 }}
-      onClick={onClick}
-      onDoubleClick={onStartRename}
-      onContextMenu={(e) => {
-        e.preventDefault()
-        onMenu(e.clientX, e.clientY)
-      }}
+      style={{ paddingLeft: 12 + depth * 12 }}
+      // Single click: preview tab. Double click: keep the tab (Postman).
+      onClick={() => onOpen(true)}
+      onDoubleClick={() => onOpen(false)}
+      onKeyDown={onKey}
+      onContextMenu={(e) => onMenu(e, 'pointer')}
     >
       {node.kind === 'request' ? (
-        <span className={methodClass(node.method ?? 'GET')}>{methodLabel(node.method ?? 'GET')}</span>
+        <span className={`tree-method ${methodClass(node.method ?? 'GET')}`}>{methodLabel(node.method ?? 'GET')}</span>
       ) : (
         <>
-          <Chevron
-            size={14}
-            className="tree-chevron"
+          <button
+            className="btn-icon tree-chevron"
+            aria-label={open ? 'Collapse' : 'Expand'}
             onClick={(e) => {
               e.stopPropagation()
               onToggle()
             }}
-          />
+            onDoubleClick={(e) => e.stopPropagation()}
+          >
+            <Chevron size={14} />
+          </button>
           {node.kind === 'folder' && <Folder size={14} className="tree-icon" />}
         </>
       )}
@@ -264,17 +408,27 @@ function TreeRow({ node, depth, open, active, renaming, onClick, onToggle, onMen
           !
         </span>
       )}
-      <button
-        className="btn-icon tree-more"
-        aria-label={`Actions for ${node.name}`}
-        onClick={(e) => {
-          e.stopPropagation()
-          const r = e.currentTarget.getBoundingClientRect()
-          onMenu(r.left, r.bottom)
-        }}
-      >
-        <MoreHorizontal size={14} />
-      </button>
+      <span className="tree-actions" onClick={(e) => e.stopPropagation()} onDoubleClick={(e) => e.stopPropagation()}>
+        {node.kind !== 'request' && (
+          <button className="btn-icon tree-hover" aria-label={`Add request to ${node.name}`} title="Add request" onClick={onAdd}>
+            <Plus size={14} />
+          </button>
+        )}
+        {node.kind === 'collection' && (
+          <button
+            className={`btn-icon tree-star${favorite ? ' on' : ' tree-hover'}`}
+            aria-label={favorite ? `Unfavorite ${node.name}` : `Favorite ${node.name}`}
+            aria-pressed={favorite}
+            title={favorite ? 'Remove from favorites' : 'Add to favorites'}
+            onClick={onFavorite}
+          >
+            <Star size={13} fill={favorite ? 'currentColor' : 'none'} />
+          </button>
+        )}
+        <button className="btn-icon tree-hover" aria-label={`Actions for ${node.name}`} title="View more actions" onClick={(e) => onMenu(e, 'below')}>
+          <MoreHorizontal size={14} />
+        </button>
+      </span>
     </div>
   )
 }
@@ -296,8 +450,10 @@ export function RenameInput({ initial, onDone }: { initial: string; onDone(name:
       defaultValue={initial}
       autoFocus
       onClick={(e) => e.stopPropagation()}
+      onDoubleClick={(e) => e.stopPropagation()}
       onBlur={(e) => finish(e.currentTarget.value)}
       onKeyDown={(e) => {
+        e.stopPropagation()
         if (e.key === 'Enter') finish(e.currentTarget.value)
         if (e.key === 'Escape') finish(initial)
       }}
@@ -307,39 +463,35 @@ export function RenameInput({ initial, onDone }: { initial: string; onDone(name:
 
 // ---------------- Environments ----------------
 
-function EnvironmentsPanel({ workspace, activeEnvironment, renamingId, actions }: Props) {
-  const [menu, setMenu] = useState<{ env: EnvironmentInfo; x: number; y: number } | null>(null)
+function EnvironmentList({ workspace, activeEnvironment, renamingId, actions, filter, showMenu }: ListProps) {
+  const envs = workspace.environments.filter((e) => matches(e.name, filter))
+  const menuFor = (env: EnvironmentInfo): MenuItem[] => [
+    { label: activeEnvironment === env.id ? 'Deactivate' : 'Set active', onClick: () => actions.setActiveEnvironment(activeEnvironment === env.id ? null : env.id) },
+    'separator',
+    { label: 'Rename', shortcut: `${mod}E`, onClick: () => actions.startRename(env.id) },
+    { label: 'Export', onClick: () => actions.exportEnvironment(env.id) },
+    { label: 'Delete', danger: true, shortcut: 'Del', onClick: () => actions.deleteEnvironment(env.id, env.name) },
+  ]
   return (
-    <>
-      <PanelHead title="Environments" onAdd={actions.createEnvironment} addLabel="New environment" />
-      <div className="tree">
-        <div className="tree-row" data-testid="env-row" onClick={() => actions.openVariables('globals', 'Globals')}>
-          <Globe size={14} className="tree-icon" />
-          <span className="tree-name">Globals</span>
-        </div>
-        {workspace.environments.map((env) => (
+    <div className="tree" role="tree" aria-label="Environments">
+      {envs.map((env) => {
+        const on = activeEnvironment === env.id
+        return (
           <div
             key={env.id}
             className="tree-row"
             data-testid="env-row"
+            role="treeitem"
+            tabIndex={0}
             onClick={() => actions.openVariables(`env:${env.id}`, env.name)}
-            onDoubleClick={() => actions.startRename(env.id)}
-            onContextMenu={(e) => {
-              e.preventDefault()
-              setMenu({ env, x: e.clientX, y: e.clientY })
+            onKeyDown={(e) => {
+              if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'e') {
+                e.preventDefault()
+                actions.startRename(env.id)
+              }
             }}
+            onContextMenu={(e) => showMenu(e, menuFor(env), 'pointer')}
           >
-            <button
-              className={`btn-icon env-check${activeEnvironment === env.id ? ' on' : ''}`}
-              aria-label={activeEnvironment === env.id ? `Deactivate ${env.name}` : `Set ${env.name} active`}
-              title={activeEnvironment === env.id ? 'Active environment' : 'Set active'}
-              onClick={(e) => {
-                e.stopPropagation()
-                actions.setActiveEnvironment(activeEnvironment === env.id ? null : env.id)
-              }}
-            >
-              <Check size={13} />
-            </button>
             {renamingId === env.id ? (
               <RenameInput initial={env.name} onDone={(name) => (name && name !== env.name ? actions.renameEnvironment(env.id, name) : actions.startRename(null))} />
             ) : (
@@ -350,122 +502,123 @@ function EnvironmentsPanel({ workspace, activeEnvironment, renamingId, actions }
                 !
               </span>
             )}
-            <button
-              className="btn-icon tree-more"
-              aria-label={`Actions for ${env.name}`}
-              onClick={(e) => {
-                e.stopPropagation()
-                const r = e.currentTarget.getBoundingClientRect()
-                setMenu({ env, x: r.left, y: r.bottom })
-              }}
-            >
-              <MoreHorizontal size={14} />
-            </button>
+            <span className="tree-actions" onClick={(e) => e.stopPropagation()}>
+              <button
+                className={`btn-icon env-check${on ? ' on' : ' tree-hover'}`}
+                aria-label={on ? `Deactivate ${env.name}` : `Set ${env.name} active`}
+                aria-pressed={on}
+                title={on ? 'Active environment' : 'Set active'}
+                onClick={() => actions.setActiveEnvironment(on ? null : env.id)}
+              >
+                <Check size={11} strokeWidth={3} />
+              </button>
+              <button className="btn-icon tree-hover" aria-label={`Actions for ${env.name}`} title="View more actions" onClick={(e) => showMenu(e, menuFor(env))}>
+                <MoreHorizontal size={14} />
+              </button>
+            </span>
           </div>
-        ))}
-        {workspace.environments.length === 0 && <div className="tree-empty">An environment is a set of variables, like Dev or Prod. Click + to create one.</div>}
-      </div>
-      {menu && (
-        <Menu
-          style={{ left: menu.x, top: menu.y }}
-          onClose={() => setMenu(null)}
-          items={[
-            { label: 'Rename', onClick: () => actions.startRename(menu.env.id) },
-            { label: 'Export', onClick: () => actions.exportEnvironment(menu.env.id) },
-            { label: 'Delete', danger: true, onClick: () => actions.deleteEnvironment(menu.env.id, menu.env.name) },
-          ]}
-        />
+        )
+      })}
+      {workspace.environments.length === 0 && (
+        <div className="tree-empty">
+          An environment is a set of variables, like Dev or Prod.{' '}
+          <button className="link-btn" onClick={actions.createEnvironment}>
+            Create environment
+          </button>
+        </div>
       )}
-    </>
-  )
-}
-
-// ---------------- History ----------------
-
-function HistoryPanel({ history, actions }: Props) {
-  const [filter, setFilter] = useState('')
-  const shown = filter ? history.filter((h) => `${h.item.request.method} ${rawUrl(h.item.request.url)}`.toLowerCase().includes(filter.toLowerCase())) : history
-  return (
-    <>
-      <PanelHead
-        title="History"
-        extra={
-          history.length ? (
-            <button className="link-btn" onClick={() => window.confirm('Clear all history?') && actions.deleteHistory()}>
-              Clear all
-            </button>
-          ) : undefined
-        }
-      />
-      <div className="panel-filter">
-        <input className="input" placeholder="Filter history" aria-label="Filter history" value={filter} onChange={(e) => setFilter(e.target.value)} />
-      </div>
-      <div className="tree">
-        {shown.length === 0 && <div className="tree-empty">Requests you send will appear here.</div>}
-        {groupBy(shown, (h) => dayLabel(h.ts)).map(([day, entries]) => (
-          <div key={day}>
-            <div className="history-day">{day}</div>
-            {entries.map((h) => (
-              <div key={h.id} className="tree-row" data-testid="history-row" onClick={() => actions.openHistory(h)} title={rawUrl(h.item.request.url)}>
-                <span className={methodClass(h.item.request.method)}>{methodLabel(h.item.request.method)}</span>
-                <span className="tree-name">{rawUrl(h.item.request.url) || h.name}</span>
-                <button
-                  className="btn-icon tree-more"
-                  aria-label="Delete history entry"
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    actions.deleteHistory(h.id)
-                  }}
-                >
-                  <Trash2 size={13} />
-                </button>
-              </div>
-            ))}
-          </div>
-        ))}
-      </div>
-    </>
+    </div>
   )
 }
 
 // ---------------- Mock servers ----------------
 
-function MocksPanel({ mocks, actions }: Props) {
-  const [menu, setMenu] = useState<{ m: MockInfo; x: number; y: number } | null>(null)
+function MockList({ mocks, actions, filter, showMenu }: ListProps) {
+  const shown = mocks.filter((m) => matches(m.def.name, filter))
+  const menuFor = (m: MockInfo): MenuItem[] => [
+    m.status.running ? { label: 'Stop', onClick: () => actions.stopMock(m.id) } : { label: 'Start', onClick: () => actions.startMock(m.id) },
+    'separator',
+    { label: 'Delete', danger: true, onClick: () => actions.deleteMock(m.id, m.def.name) },
+  ]
   return (
-    <>
-      <PanelHead title="Mock Servers" onAdd={() => actions.createMock()} addLabel="New mock server" />
-      <div className="tree">
-        {mocks.length === 0 && <div className="tree-empty">A mock server answers with the examples saved in a collection. Click + to create one.</div>}
-        {mocks.map((m) => (
-          <div key={m.id} className="tree-row" data-testid="mock-row" onClick={() => actions.openMock(m.id, m.def.name)} title={m.status.url ?? m.status.error ?? ''}>
-            <span className={`status-dot${m.status.running ? ' on' : m.status.error ? ' error' : ''}`} />
-            <span className="tree-name">{m.def.name}</span>
-            <span className="muted">:{m.def.port}</span>
-            <button
-              className="btn-icon tree-more"
-              aria-label={`Actions for ${m.def.name}`}
-              onClick={(e) => {
-                e.stopPropagation()
-                const r = e.currentTarget.getBoundingClientRect()
-                setMenu({ m, x: r.left, y: r.bottom })
-              }}
-            >
+    <div className="tree" role="tree" aria-label="Mocks">
+      {mocks.length === 0 && (
+        <div className="tree-empty">
+          A mock server answers with the examples saved in a collection.{' '}
+          <button className="link-btn" onClick={() => actions.createMock()}>
+            Create mock server
+          </button>
+        </div>
+      )}
+      {shown.map((m) => (
+        <div
+          key={m.id}
+          className="tree-row"
+          data-testid="mock-row"
+          role="treeitem"
+          tabIndex={0}
+          onClick={() => actions.openMock(m.id, m.def.name)}
+          onContextMenu={(e) => showMenu(e, menuFor(m), 'pointer')}
+          title={m.status.url ?? m.status.error ?? ''}
+        >
+          <span className={`status-dot${m.status.running ? ' on' : m.status.error ? ' error' : ''}`} />
+          <span className="tree-name">{m.def.name}</span>
+          <span className="muted">:{m.def.port}</span>
+          <span className="tree-actions" onClick={(e) => e.stopPropagation()}>
+            <button className="btn-icon tree-hover" aria-label={`Actions for ${m.def.name}`} title="View more actions" onClick={(e) => showMenu(e, menuFor(m))}>
               <MoreHorizontal size={14} />
             </button>
-          </div>
-        ))}
+          </span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// ---------------- History ----------------
+
+function HistoryList({ history, actions, filter }: ListProps) {
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
+  const shown = filter ? history.filter((h) => matches(`${h.item.request.method} ${rawUrl(h.item.request.url)}`, filter)) : history
+  return (
+    <div className="sb-history">
+      <div className="sb-history-title">Request history</div>
+      <div className="tree" role="tree" aria-label="History">
+        {shown.length === 0 && <div className="tree-empty">{filter ? 'No requests match.' : 'Requests you send will appear here.'}</div>}
+        {groupBy(shown, (h) => dayLabel(h.ts)).map(([day, entries]) => {
+          const isOpen = !collapsed.has(day)
+          return (
+            <div key={day} role="group">
+              <button
+                className="history-day"
+                aria-expanded={isOpen}
+                onClick={() =>
+                  setCollapsed((prev) => {
+                    const next = new Set(prev)
+                    if (!next.delete(day)) next.add(day)
+                    return next
+                  })
+                }
+              >
+                {isOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                {day}
+              </button>
+              {isOpen &&
+                entries.map((h) => (
+                  <div key={h.id} className="tree-row history-row" data-testid="history-row" role="treeitem" tabIndex={0} onClick={() => actions.openHistory(h)} title={rawUrl(h.item.request.url)}>
+                    <span className={`tree-method ${methodClass(h.item.request.method)}`}>{methodLabel(h.item.request.method)}</span>
+                    <span className="tree-name">{rawUrl(h.item.request.url) || h.name}</span>
+                    <span className="tree-actions" onClick={(e) => e.stopPropagation()}>
+                      <button className="btn-icon tree-hover" aria-label="Delete history entry" title="Delete" onClick={() => actions.deleteHistory(h.id)}>
+                        <X size={13} />
+                      </button>
+                    </span>
+                  </div>
+                ))}
+            </div>
+          )
+        })}
       </div>
-      {menu && (
-        <Menu
-          style={{ left: menu.x, top: menu.y }}
-          onClose={() => setMenu(null)}
-          items={[
-            menu.m.status.running ? { label: 'Stop', onClick: () => actions.stopMock(menu.m.id) } : { label: 'Start', onClick: () => actions.startMock(menu.m.id) },
-            { label: 'Delete', danger: true, onClick: () => actions.deleteMock(menu.m.id, menu.m.def.name) },
-          ]}
-        />
-      )}
-    </>
+    </div>
   )
 }

@@ -1,5 +1,5 @@
 import { lstatSync } from 'node:fs'
-import { mkdir, readdir, readFile, rename, rm, stat } from 'node:fs/promises'
+import { cp, mkdir, readdir, readFile, rename, rm, stat } from 'node:fs/promises'
 import { basename, dirname, join, relative, resolve, sep } from 'node:path'
 import { sanitizeName, uniqueName } from '../../shared/format/names'
 import { stableStringify } from '../../shared/format/stableJson'
@@ -225,6 +225,35 @@ async function moveToName(root: string, abs: string, name: string): Promise<stri
   await rename(abs, join(parent, newEntry))
   await updateOrder(root, parent, (o) => o.map((n) => (n === oldEntry ? newEntry : n)))
   return toId(root, join(parent, newEntry))
+}
+
+/** Copies a request, folder or collection next to the original as "<name> Copy". */
+export async function duplicateNode(root: string, id: string): Promise<string> {
+  const abs = resolveInside(root, id)
+  const parent = dirname(abs)
+  const ext = abs.endsWith(REQ_EXT) ? REQ_EXT : ''
+  const isRequest = ext === REQ_EXT
+  const collection = !isRequest && isCollectionDir(root, abs)
+  const meta = isRequest ? undefined : await readMeta(metaPath(root, abs))
+  const original = isRequest ? (await readRequest(root, id)).name : ((collection ? meta?.info?.name : meta?.name) ?? basename(abs))
+  const name = `${original} Copy`
+  const entry = uniqueName(sanitizeName(name), await entryNames(parent), ext)
+  const dest = join(parent, entry)
+  await cp(abs, dest, { recursive: true, errorOnExist: true, force: false })
+  if (isRequest) await saveRequest(root, toId(root, dest), { ...(await readRequest(root, toId(root, dest))), name })
+  else {
+    const file = metaPath(root, dest)
+    const meta = await readMeta(file)
+    if (collection) meta.info = { ...meta.info, name, _postman_id: randomUUID() }
+    else meta.name = name
+    await writeFileAtomic(file, stableStringify(meta))
+  }
+  const originalEntry = basename(abs)
+  await updateOrder(root, parent, (o) => {
+    const i = o.indexOf(originalEntry)
+    return i === -1 ? [...o, entry] : [...o.slice(0, i + 1), entry, ...o.slice(i + 1)]
+  })
+  return toId(root, dest)
 }
 
 export async function deleteNode(root: string, id: string): Promise<void> {

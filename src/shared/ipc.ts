@@ -84,6 +84,8 @@ export interface UiState {
   activeEnvironment: string | null
   tabs: UiTab[]
   activeIndex: number
+  /** Favorited collection ids (shown first, with a star). */
+  favorites?: string[]
 }
 
 export interface Api {
@@ -93,6 +95,8 @@ export interface Api {
   /** The most recently used workspace, reopened at startup. */
   currentWorkspace(): Promise<WorkspaceInfo | null>
   refreshWorkspace(): Promise<WorkspaceInfo>
+  /** Switches to a folder from Settings' recent workspaces list. */
+  openRecentWorkspace(dir: string): Promise<WorkspaceInfo>
 
   // collections tree
   createCollection(name: string): Promise<Created>
@@ -101,6 +105,8 @@ export interface Api {
   createRequest(parentId: string, name: string, item?: PmItem): Promise<Created>
   /** Returns the node's new id (its file/folder is renamed to match). */
   renameNode(id: string, name: string): Promise<Created>
+  /** Copies the node next to the original as "<name> Copy". */
+  duplicateNode(id: string): Promise<Created>
   deleteNode(id: string): Promise<WorkspaceInfo>
   readRequest(id: string): Promise<PmItem>
   saveRequest(id: string, item: PmItem): Promise<WorkspaceInfo>
@@ -214,10 +220,12 @@ export const CHANNELS = {
   openWorkspaceDialog: 'workspace:openDialog',
   currentWorkspace: 'workspace:current',
   refreshWorkspace: 'workspace:refresh',
+  openRecentWorkspace: 'workspace:openRecent',
   createCollection: 'node:createCollection',
   createFolder: 'node:createFolder',
   createRequest: 'node:createRequest',
   renameNode: 'node:rename',
+  duplicateNode: 'node:duplicate',
   deleteNode: 'node:delete',
   readRequest: 'request:read',
   saveRequest: 'request:save',

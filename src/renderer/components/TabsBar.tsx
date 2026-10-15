@@ -1,5 +1,5 @@
-import { Eye, Folder, Gauge, Globe, Layers, PlayCircle, Plus, Radio, Server, X } from 'lucide-react'
-import { useState } from 'react'
+import { ChevronDown, Eye, Folder, Gauge, Globe, Layers, PlayCircle, Plus, Radio, Server, X } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
 import type { EnvironmentInfo } from '../../shared/format/types'
 import type { ResolvedVariable } from '../../shared/ipc'
 import { methodClass, methodLabel } from '../lib/methods'
@@ -10,6 +10,8 @@ interface Props {
   tabs: Tab[]
   activeKey: string | null
   onActivate(key: string): void
+  /** Keep a preview tab (double-click). */
+  onPin(key: string): void
   onClose(tab: Tab): void
   onCloseMany(tabs: Tab[]): void
   onNew(): void
@@ -36,6 +38,12 @@ function TabIcon({ tab }: { tab: Tab }) {
 export function TabsBar(p: Props) {
   const [look, setLook] = useState(false)
   const [menu, setMenu] = useState<{ x: number; y: number; key: string } | null>(null)
+  const [list, setList] = useState<DOMRect | null>(null)
+  const strip = useRef<HTMLDivElement>(null)
+  // Braces matter: scrollIntoView returns a Promise in current Chromium, and React would call it as a cleanup.
+  useEffect(() => {
+    strip.current?.querySelector('.tab.active')?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+  }, [p.activeKey, p.tabs.length])
   const menuItems = (key: string) => {
     const i = p.tabs.findIndex((t) => t.key === key)
     const tab = p.tabs[i]
@@ -52,7 +60,7 @@ export function TabsBar(p: Props) {
   }
   return (
     <div className="tabs-row">
-      <div className="tabs" role="tablist">
+      <div className="tabs" role="tablist" ref={strip}>
         {p.tabs.map((tab) => {
           const title = tabTitle(tab)
           return (
@@ -60,9 +68,10 @@ export function TabsBar(p: Props) {
               key={tab.key}
               role="tab"
               aria-selected={tab.key === p.activeKey}
-              className={`tab${tab.key === p.activeKey ? ' active' : ''}${tab.id === null ? ' draft' : ''}`}
-              title={title}
+              className={`tab${tab.key === p.activeKey ? ' active' : ''}${tab.preview ? ' preview' : ''}`}
+              title={tab.preview ? `${title} (preview — double-click to keep open)` : title}
               onClick={() => p.onActivate(tab.key)}
+              onDoubleClick={() => tab.preview && p.onPin(tab.key)}
               onAuxClick={(e) => e.button === 1 && p.onClose(tab)}
               onContextMenu={(e) => {
                 e.preventDefault()
@@ -90,6 +99,18 @@ export function TabsBar(p: Props) {
         </button>
       </div>
       {menu && <Menu style={{ left: menu.x, top: menu.y }} onClose={() => setMenu(null)} items={menuItems(menu.key)} />}
+      <button className="btn-icon tabs-list-btn" aria-label="Open tabs" title="Open tabs" disabled={!p.tabs.length} onClick={(e) => setList(e.currentTarget.getBoundingClientRect())}>
+        <ChevronDown size={14} />
+      </button>
+      {list && (
+        <Menu
+          label="Open tabs"
+          searchable
+          style={{ left: list.right - 260, top: list.bottom + 4 }}
+          onClose={() => setList(null)}
+          items={p.tabs.map((t) => ({ label: tabTitle(t), shortcut: t.key === p.activeKey ? '✓' : undefined, onClick: () => p.onActivate(t.key) }))}
+        />
+      )}
       <div className="env-selector">
         <select aria-label="Environment" className="select env-select" value={p.activeEnvironment ?? ''} onChange={(e) => p.onEnvironment(e.target.value || null)}>
           <option value="">No Environment</option>
