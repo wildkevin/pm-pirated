@@ -1,3 +1,4 @@
+import { DEFAULT_SHORTCUTS, type ShortcutBindings } from './shortcuts'
 import type { ClientCert } from './engine'
 
 export const THEMES = ['Light', 'High Contrast Light', 'Ayu Light', 'Night Owl Light', 'Solarized Light', 'Dark', 'High Contrast Dark', 'Ayu Dark', 'Dracula', 'Monokai', 'Night Owl Dark', 'Solarized Dark'] as const
@@ -5,6 +6,7 @@ export type ThemeName = typeof THEMES[number]
 
 /** Local app preferences, stored separately from workspace data. */
 export interface AppSettingsData {
+  shortcutBindings: ShortcutBindings
   recentWorkspaces: string[]
   /** Electron zoom level (0 = 100%, each step ≈ ×1.2), like View > Zoom in Postman. */
   zoomLevel: number
@@ -53,6 +55,7 @@ export interface AppSettingsData {
 }
 
 export const DEFAULT_SETTINGS: AppSettingsData = {
+  shortcutBindings: { ...DEFAULT_SHORTCUTS },
   recentWorkspaces: [],
   zoomLevel: 0,
   general: { httpVersion: 'auto', disableCookies: false, sendNoCache: true, tlsKeyLog: false, workingDirectory: '', responseFormat: 'auto', timeoutMs: 0, maxResponseSizeMb: 50, sslVerification: true, followRedirects: true, sendPostmanToken: true, allowFilesOutsideWorkingDir: false },

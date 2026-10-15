@@ -1,3 +1,4 @@
+import { ShortcutSettings } from './ShortcutSettings'
 import { palettes, isDarkTheme } from '../settings'
 import { Trash2 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
@@ -248,9 +249,9 @@ export function CookiesModal({ onClose }: { onClose(): void }) {
 const settingsTabs = ['general', 'themes', 'shortcuts', 'data', 'certificates', 'proxy', 'about'] as const
 type SettingsTab = typeof settingsTabs[number]
 
-export function SettingsModal({ onClose, onSaved, onImport }: { onClose(): void; onSaved(s: AppSettingsData): void; onImport(): void }) {
+export function SettingsModal({ onClose, onSaved, onImport, initialTab = 'general' }: { initialTab?: 'general' | 'shortcuts'; onClose(): void; onSaved(s: AppSettingsData): void; onImport(): void }) {
   const [s, setS] = useState<AppSettingsData | null>(null)
-  const [tab, setTab] = useState<SettingsTab>('general')
+  const [tab, setTab] = useState<SettingsTab>(initialTab)
   const [workspace, setWorkspace] = useState<WorkspaceInfo | null>(null)
   const revision = useRef(0)
   useEffect(() => { void window.api.currentWorkspace().then(setWorkspace) }, [])
@@ -344,12 +345,7 @@ export function SettingsModal({ onClose, onSaved, onImport }: { onClose(): void;
             </div>
           })}</div>
         </>}
-        {tab === 'shortcuts' && <>
-          <SettingToggle label="Keyboard Shortcuts" value={ui.shortcuts} onChange={v => setUI({ shortcuts: v })} />
-          <div className="section-title settings-section-heading">Shortcuts<button className="link-btn" onClick={() => setUI({ shortcuts: true })}>Restore Defaults</button></div>
-          <p className="muted">Use Command on macOS or Ctrl on Windows. Editor editing shortcuts remain available.</p>
-          <div className="shortcut-list">{[['Settings', '⌘ / Ctrl ,'], ['Save request', '⌘ / Ctrl S'], ['Send request', '⌘ / Ctrl Enter'], ['New request tab', '⌘ / Ctrl T'], ['Close tab', '⌘ / Ctrl W'], ['Force close tab', 'Alt ⌘ / Ctrl W'], ['Next tab', 'Shift ⌘ / Ctrl ]'], ['Previous tab', 'Shift ⌘ / Ctrl ['], ['Tab by position', '⌘ / Ctrl 1–8'], ['Last tab', '⌘ / Ctrl 9'], ['Search', '⌘ / Ctrl K'], ['Toggle sidebar', '⌘ / Ctrl \\'], ['Show middle workbench', 'Alt ⌘ / Ctrl M'], ['Swap sidebars', 'Alt ⌘ / Ctrl S']].map(([label, key]) => <div className="setting-row" key={label}><span>{label}</span><kbd>{key}</kbd></div>)}</div>
-        </>}
+        {tab === 'shortcuts' && <ShortcutSettings bindings={s.shortcutBindings} enabled={ui.shortcuts} onChange={(shortcutBindings, shortcuts) => void save({ ...s, shortcutBindings, ui: { ...ui, shortcuts } })} />}
         {tab === 'data' && <>
           <div className="section-title">Import data</div><p className="muted">Import Postman collections, environments, globals, and cURL requests into your workspace.</p><button className="btn btn-secondary" disabled={!workspace} onClick={onImport}>Import Data File</button>
           <div className="section-title">Export workspace data</div><p className="muted">Export collections and environments as Postman JSON. Current secret variable values stay in the local secret store.</p>

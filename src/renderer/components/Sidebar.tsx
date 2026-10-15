@@ -1,3 +1,5 @@
+import { findShortcut, displayBinding, type ShortcutId } from '../../shared/shortcuts'
+import { useSettings, useShortcutLabel } from '../settings'
 import { Box, Check, ChevronDown, ChevronRight, Clock, Folder, Import, ListFilter, MoreHorizontal, Plus, Star, X } from 'lucide-react'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { EnvironmentInfo, TreeNode, WorkspaceInfo } from '../../shared/format/types'
@@ -5,7 +7,7 @@ import type { HistoryEntry } from '../../shared/ipc'
 import type { MockInfo } from '../../shared/mock'
 import { rawUrl } from '../../shared/format/url'
 import { methodClass, methodLabel } from '../lib/methods'
-import { dayLabel, groupBy, mod } from '../lib/misc'
+import { dayLabel, groupBy } from '../lib/misc'
 import { Menu, type MenuItem } from './common/ui'
 
 /** Which sidebar view (Workspace items or History) to show, and which section to reveal. */
@@ -232,6 +234,8 @@ function filterTree(nodes: TreeNode[], filter: string): TreeNode[] {
 }
 
 function CollectionsTree({ workspace, activeId, renamingId, favorites, actions, filter, showMenu }: ListProps) {
+  const settings = useSettings()
+  const shortcut = (id: ShortcutId) => settings.ui.shortcuts ? displayBinding(settings.shortcutBindings[id], /Mac/.test(navigator.platform)) : ''
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
 
   // Reveal newly created / renamed / opened nodes by expanding their ancestors.
@@ -255,9 +259,9 @@ function CollectionsTree({ workspace, activeId, renamingId, favorites, actions, 
 
   const menuFor = (n: TreeNode): MenuItem[] => {
     const edit: MenuItem[] = [
-      { label: 'Rename', shortcut: `${mod}E`, onClick: () => actions.startRename(n.id) },
-      { label: 'Duplicate', shortcut: `${mod}D`, onClick: () => actions.duplicate(n.id) },
-      { label: 'Delete', danger: true, shortcut: 'Del', onClick: () => actions.remove(n.id, n.name) },
+      { label: 'Rename', shortcut: shortcut('sidebarRename'), onClick: () => actions.startRename(n.id) },
+      { label: 'Duplicate', shortcut: shortcut('sidebarDuplicate'), onClick: () => actions.duplicate(n.id) },
+      { label: 'Delete', danger: true, shortcut: shortcut('sidebarDelete'), onClick: () => actions.remove(n.id, n.name) },
     ]
     if (n.kind === 'request')
       return [{ label: 'Open in new tab', onClick: () => actions.openRequest(n.id, false) }, 'separator', ...edit]
@@ -309,34 +313,33 @@ function CollectionsTree({ workspace, activeId, renamingId, favorites, actions, 
           onFavorite={() => actions.toggleFavorite(node.id)}
           onRename={(name) => (name && name !== node.name ? actions.rename(node.id, name) : actions.startRename(null))}
           onKey={(e) => {
-            const k = e.key.toLowerCase()
-            if (renamingId) return
+            if (renamingId || !settings.ui.shortcuts || e.target !== e.currentTarget) return
+            let command = findShortcut(settings.shortcutBindings, e, /Mac/.test(navigator.platform), true)
+            if (!command && e.key === 'F2' && settings.shortcutBindings.sidebarRename === 'Mod+KeyE') command = 'sidebarRename'
+            if (!command && e.key === 'Delete' && settings.shortcutBindings.sidebarDelete === 'Backspace') command = 'sidebarDelete'
             const row = e.currentTarget as HTMLElement
             const visible = Array.from(row.closest('[role="tree"]')?.querySelectorAll<HTMLElement>('[role="treeitem"]') ?? [])
             const index = visible.indexOf(row)
             let target: HTMLElement | undefined
-            if (e.key === 'ArrowDown') target = visible[Math.min(visible.length - 1, index + 1)]
-            else if (e.key === 'ArrowUp') target = visible[Math.max(0, index - 1)]
-            else if (e.key === 'Home') target = visible[0]
-            else if (e.key === 'End') target = visible.at(-1)
-            else if (e.key === 'ArrowRight') {
+            const descendants = (n: TreeNode): string[] => [n.id, ...(n.children ?? []).flatMap(descendants)]
+            if (command === 'sidebarNext') target = visible[Math.min(visible.length - 1, index + 1)]
+            else if (command === 'sidebarPrevious') target = visible[Math.max(0, index - 1)]
+            else if (e.key === 'Home' && !e.metaKey && !e.ctrlKey && !e.altKey) target = visible[0]
+            else if (e.key === 'End' && !e.metaKey && !e.ctrlKey && !e.altKey) target = visible.at(-1)
+            else if (command === 'sidebarExpand') {
               if (node.children && !isOpen) toggle(node.id)
               else if (node.children?.length) target = visible[index + 1]
-            } else if (e.key === 'ArrowLeft') {
+            } else if (command === 'sidebarCollapse') {
               if (node.children && isOpen) toggle(node.id)
-              else target = visible.slice(0, index).reverse().find((r) => Number(r.getAttribute('aria-level')) < depth + 1)
-            }
-            if (['ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) {
-              e.preventDefault(); e.stopPropagation(); target?.focus(); return
-            }
-            if ((e.ctrlKey || e.metaKey) && k === 'e') actions.startRename(node.id)
-            else if ((e.ctrlKey || e.metaKey) && k === 'd') actions.duplicate(node.id)
-            else if (e.key === 'F2') actions.startRename(node.id)
-            else if (e.key === 'Delete' || ((e.ctrlKey || e.metaKey) && e.key === 'Backspace')) actions.remove(node.id, node.name)
-            else if (e.key === 'Enter') return void (node.kind === 'request' ? actions.openRequest(node.id, false) : toggle(node.id))
+              else target = visible.slice(0, index).reverse().find(r => Number(r.getAttribute('aria-level')) < depth + 1)
+            } else if (command === 'sidebarExpandAll') setExpanded(prev => new Set([...prev, ...descendants(node)]))
+            else if (command === 'sidebarCollapseAll') { const ids = new Set(descendants(node)); setExpanded(prev => new Set([...prev].filter(id => !ids.has(id)))) }
+            else if (command === 'sidebarRename') actions.startRename(node.id)
+            else if (command === 'sidebarDuplicate') actions.duplicate(node.id)
+            else if (command === 'sidebarDelete') actions.remove(node.id, node.name)
+            else if (command === 'sidebarSelect') node.kind === 'request' ? actions.openRequest(node.id, false) : toggle(node.id)
             else return
-            e.preventDefault()
-            e.stopPropagation()
+            e.preventDefault(); e.stopPropagation(); target?.focus()
           }}
         />,
       )
@@ -483,13 +486,15 @@ export function RenameInput({ initial, onDone }: { initial: string; onDone(name:
 // ---------------- Environments ----------------
 
 function EnvironmentList({ workspace, activeEnvironment, renamingId, actions, filter, showMenu }: ListProps) {
+  const settings = useSettings()
+  const shortcut = useShortcutLabel()
   const envs = workspace.environments.filter((e) => matches(e.name, filter))
   const menuFor = (env: EnvironmentInfo): MenuItem[] => [
     { label: activeEnvironment === env.id ? 'Deactivate' : 'Set active', onClick: () => actions.setActiveEnvironment(activeEnvironment === env.id ? null : env.id) },
     'separator',
-    { label: 'Rename', shortcut: `${mod}E`, onClick: () => actions.startRename(env.id) },
+    { label: 'Rename', shortcut: shortcut('sidebarRename'), onClick: () => actions.startRename(env.id) },
     { label: 'Export', onClick: () => actions.exportEnvironment(env.id) },
-    { label: 'Delete', danger: true, shortcut: 'Del', onClick: () => actions.deleteEnvironment(env.id, env.name) },
+    { label: 'Delete', danger: true, shortcut: shortcut('sidebarDelete'), onClick: () => actions.deleteEnvironment(env.id, env.name) },
   ]
   return (
     <div className="tree" role="tree" aria-label="Environments">
@@ -504,10 +509,16 @@ function EnvironmentList({ workspace, activeEnvironment, renamingId, actions, fi
             tabIndex={0}
             onClick={() => actions.openVariables(`env:${env.id}`, env.name)}
             onKeyDown={(e) => {
-              if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'e') {
-                e.preventDefault()
-                actions.startRename(env.id)
-              }
+              if (renamingId || !settings.ui.shortcuts || e.target !== e.currentTarget) return
+              const command = findShortcut(settings.shortcutBindings, e, /Mac/.test(navigator.platform), true)
+              if (command === 'sidebarRename') actions.startRename(env.id)
+              else if (command === 'sidebarDelete') actions.deleteEnvironment(env.id, env.name)
+              else if (command === 'sidebarSelect') actions.openVariables(`env:${env.id}`, env.name)
+              else if (command === 'sidebarNext' || command === 'sidebarPrevious') {
+                const rows = [...e.currentTarget.parentElement!.querySelectorAll<HTMLElement>('[role="treeitem"]')]
+                rows[Math.max(0, Math.min(rows.length - 1, rows.indexOf(e.currentTarget) + (command === 'sidebarNext' ? 1 : -1)))]?.focus()
+              } else return
+              e.preventDefault(); e.stopPropagation()
             }}
             onContextMenu={(e) => showMenu(e, menuFor(env), 'pointer')}
           >

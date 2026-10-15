@@ -1,3 +1,4 @@
+import { findShortcut, displayBinding, type ShortcutId } from '../shared/shortcuts'
 import { SettingsProvider, VariableNamesContext } from './settings'
 import { Allotment } from 'allotment'
 import { Cookie, Globe, PanelLeft, PanelRight, PlayCircle, Radio, Terminal } from 'lucide-react'
@@ -35,7 +36,7 @@ let seq = 0
 const nextId = () => `${Date.now()}-${++seq}`
 const MAX_CONSOLE = 300
 
-type ModalState = { kind: 'import' } | { kind: 'settings' } | { kind: 'cookies' } | { kind: 'save'; key: string } | { kind: 'mock'; target?: string } | null
+type ModalState = { kind: 'import' } | { kind: 'settings'; section?: 'general' | 'shortcuts' } | { kind: 'cookies' } | { kind: 'save'; key: string } | { kind: 'mock'; target?: string } | null
 
 function findPath(nodes: TreeNode[], id: string): TreeNode[] {
   for (const n of nodes) {
@@ -72,12 +73,14 @@ export function App() {
   const [history, setHistory] = useState<HistoryEntry[]>([])
   const [settings, setSettings] = useState<AppSettingsData | null>(null)
   const prefs = settings ?? DEFAULT_SETTINGS
+  const shortcutLabel = (id: ShortcutId) => prefs.ui.shortcuts ? displayBinding(prefs.shortcutBindings[id], /Mac/.test(navigator.platform)) : ''
   const settingsRef = useRef(prefs)
   settingsRef.current = prefs
   const [resolved, setResolved] = useState<ResolvedVariable[]>([])
   const [consoleOpen, setConsoleOpen] = useState(false)
   const [consoleEntries, setConsoleEntries] = useState<ConsoleEntry[]>([])
   const [closing, setClosing] = useState<string[]>([])
+  const [layoutVersion, setLayoutVersion] = useState(0)
   const requestSplit = useRef<number[] | undefined>(undefined)
   const [notice, setNotice] = useState<string | null>(null)
   const [overlayPanel, setOverlayPanel] = useState<'left' | 'right' | null>(null)
@@ -422,55 +425,87 @@ export function App() {
     return () => clearTimeout(timer)
   }, [state.tabs, state.workspace?.root, prefs.ui.autosave])
 
-  // --- keyboard shortcuts (Postman's) ---
+  // One binding map drives both editable Settings and command dispatch. Modifiers match exactly.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || e.isComposing || (e.target as Element)?.closest?.('[data-shortcut-recorder]')) return
       if (e.key === 'Escape' && overlayPanel) { setOverlayPanel(null); return }
       if (e.key === 'Escape' && page && stateRef.current.workspace && !modal) { setPage(null); return }
-      if ((e.ctrlKey || e.metaKey) && e.key === ',') { e.preventDefault(); setModal({ kind: 'settings' }); return }
       if (!prefs.ui.shortcuts) return
-      if (!(e.ctrlKey || e.metaKey) || !stateRef.current.workspace || modal || closing.length) return
-      const tab = activeTab(stateRef.current)
-      const k = e.altKey && /^Key[A-Z]$/.test(e.code) ? e.code.slice(3).toLowerCase() : e.key.toLowerCase()
-      if (e.altKey && (k === 'm' || k === 's')) {
-        e.preventDefault()
-        const key = k === 'm' ? 'middleWorkbench' : 'swapSidebars'
-        const next = { ...prefs, ui: { ...prefs.ui, [key]: !prefs.ui[key] } }
-        void window.api.saveSettings(next).then(() => setSettings(next))
-      } else if (k === 's' && tab) {
-        e.preventDefault()
-        void save(tab)
-      } else if (k === 'enter' && tab && !tab.sendId) {
-        e.preventDefault()
-        send(tab)
-      } else if (k === 't') {
-        e.preventDefault()
-        newRequestTab()
-      } else if (k === 'w' && tab) {
-        e.preventDefault()
-        if (e.altKey) act({ type: 'closeMany', keys: [tab.key] }); else close(tab)
-      } else if (e.key === '\\') {
-        e.preventDefault()
-        toggleSidebar()
-      } else if (k === 'k') {
-        e.preventDefault()
-        setSearchOpen(true)
-      } else if (/^[1-9]$/.test(k)) {
-        const target = stateRef.current.tabs[k === '9' ? stateRef.current.tabs.length - 1 : Number(k) - 1]
-        if (target) { e.preventDefault(); act({ type: 'activate', key: target.key }) }
-      } else if (e.shiftKey && (e.code === 'BracketLeft' || e.code === 'BracketRight')) {
-        e.preventDefault()
-        const tabs = stateRef.current.tabs
-        const index = tabs.findIndex(t => t.key === stateRef.current.activeKey)
-        const target = tabs[(index + (e.code === 'BracketRight' ? 1 : tabs.length - 1)) % tabs.length]
-        if (target) act({ type: 'activate', key: target.key })
-      } else if (e.key === '[' || e.key === ']') {
-        e.preventDefault()
-        navigate(e.key === '[' ? 'back' : 'forward')
+      const command = findShortcut(prefs.shortcutBindings, e, /Mac/.test(navigator.platform))
+      if (!command) return
+      if (modal || closing.length) {
+        if (!['zoomIn', 'zoomOut', 'zoomReset'].includes(command)) return
       }
+      const workspace = stateRef.current.workspace
+      const tab = activeTab(stateRef.current)
+      const focus = (selector: string) => requestAnimationFrame(() => document.querySelector<HTMLElement>(selector)?.focus())
+      const togglePreference = (key: 'twoPane' | 'middleWorkbench' | 'swapSidebars') => {
+        const next = { ...settingsRef.current, ui: { ...settingsRef.current.ui, [key]: !settingsRef.current.ui[key] } }
+        setSettings(next)
+        void window.api.saveSettings(next).catch(fail)
+      }
+      if (!workspace && !['settings', 'shortcutHelp', 'zoomIn', 'zoomOut', 'zoomReset', 'search'].includes(command)) return
+      switch (command) {
+        case 'settings': setModal({ kind: 'settings' }); break
+        case 'shortcutHelp': setModal({ kind: 'settings', section: 'shortcuts' }); break
+        case 'save': if (tab) void save(tab); break
+        case 'saveAs': if (tab?.doc.kind === 'request') setModal({ kind: 'save', key: tab.key }); break
+        case 'send': case 'sendDownload': if (tab && !tab.sendId) send(tab, command === 'sendDownload'); break
+        case 'requestUrl': focus('[aria-label="Request URL"]'); break
+        case 'newRequest': newRequestTab(); break
+        case 'closeTab': if (tab) close(tab); break
+        case 'forceCloseTab': if (tab) act({ type: 'closeMany', keys: [tab.key] }); break
+        case 'reopenTab': act({ type: 'reopenClosed' }); break
+        case 'nextTab': case 'previousTab': {
+          const tabs = stateRef.current.tabs, index = tabs.findIndex(t => t.key === stateRef.current.activeKey)
+          const target = tabs[(index + (command === 'nextTab' ? 1 : tabs.length - 1)) % tabs.length]
+          if (target) act({ type: 'activate', key: target.key })
+          break
+        }
+        case 'lastTab': { const target = stateRef.current.tabs.at(-1); if (target) act({ type: 'activate', key: target.key }); break }
+        case 'runner': {
+          const target = tab?.id?.startsWith('collections/') ? (tab.doc.kind === 'request' ? tab.id.split('/').slice(0, 2).join('/') : tab.id) : workspace?.collections[0]?.id
+          if (target) act({ type: 'openRunner', target }); break
+        }
+        case 'searchTabs': document.querySelector<HTMLButtonElement>('[aria-label="Open tabs"]')?.click(); break
+        case 'searchSidebar':
+          if (viewportWidth < 750) setOverlayPanel('left'); else setSidebarOpen(true)
+          focus('[aria-label="Filter sidebar"], [aria-label="Filter history"]'); break
+        case 'leftSidebar': toggleSidebar(); break
+        case 'rightSidebar': showRight(viewportWidth < 950 ? overlayPanel !== 'right' : !rightOpen); break
+        case 'twoPane': togglePreference('twoPane'); break
+        case 'workbench': togglePreference('middleWorkbench'); break
+        case 'swapSidebars': togglePreference('swapSidebars'); break
+        case 'resetLayout': {
+          const next = { ...settingsRef.current, ui: { ...settingsRef.current.ui, twoPane: false, middleWorkbench: true, swapSidebars: false } }
+          setSettings(next); void window.api.saveSettings(next).catch(fail)
+          setSidebarOpen(true); showRight(true); setRightView('variables'); setOverlayPanel(null); setConsoleOpen(false); requestSplit.current = undefined
+          localStorage.removeItem('pm-local.sidebar'); localStorage.removeItem('pm-local.environment-width')
+          setLayoutVersion(v => v + 1); break
+        }
+        case 'environment': {
+          const selector = document.querySelector<HTMLSelectElement>('[aria-label="Environment"]')
+          selector?.focus()
+          try { selector?.showPicker() } catch { /* Focus remains available if a platform cannot open native pickers. */ }
+          break
+        }
+        case 'import': setModal({ kind: 'import' }); break
+        case 'search': setSearchOpen(true); break
+        case 'back': navigate('back'); break
+        case 'forward': navigate('forward'); break
+        case 'console': setConsoleOpen(v => !v); break
+        case 'clearConsole': setConsoleEntries([]); break
+        case 'zoomIn': case 'zoomOut': case 'zoomReset':
+          void window.api.adjustZoom(command === 'zoomIn' ? 'in' : command === 'zoomOut' ? 'out' : 'reset').then(zoomLevel => setSettings(s => s ? { ...s, zoomLevel } : s), fail); break
+        default:
+          if (/^tab[1-8]$/.test(command)) { const target = stateRef.current.tabs[Number(command.slice(3)) - 1]; if (target) act({ type: 'activate', key: target.key }) }
+      }
+      e.preventDefault()
     }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
+    // Capture prevents editor search/save bindings from stealing user-assigned app commands.
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
   })
 
   // --- sidebar actions ---
@@ -879,7 +914,7 @@ export function App() {
         />
       ) : state.workspace ? (
         <div className="main">
-              <Allotment proportionalLayout={false}>
+              <Allotment key={layoutVersion} proportionalLayout={false}>
                 <Allotment.Pane preferredSize={240} minSize={180} maxSize={Math.max(180, Math.min(320, viewportWidth * 0.25))} visible={prefs.ui.swapSidebars ? rightOpen && viewportWidth >= 950 : sidebarOpen && viewportWidth >= 750}>
                   {prefs.ui.swapSidebars ? rightPanel : sidebar}
                 </Allotment.Pane>
@@ -916,7 +951,7 @@ export function App() {
       ) : null}
 
       <footer className="status-bar">
-        <button className={`status-btn${sidebarVisible ? '' : ' active'}`} aria-label={sidebarVisible ? 'Hide sidebar' : 'Show sidebar'} title="Toggle sidebar (Ctrl+\\)" disabled={!state.workspace} onClick={toggleSidebar}>
+        <button className={`status-btn${sidebarVisible ? '' : ' active'}`} aria-label={sidebarVisible ? 'Hide sidebar' : 'Show sidebar'} title={`Toggle sidebar (${shortcutLabel('leftSidebar')})`} disabled={!state.workspace} onClick={toggleSidebar}>
           <PanelLeft size={12} />
         </button>
         <button className={`status-btn${consoleOpen ? ' active' : ''}`} onClick={() => setConsoleOpen(!consoleOpen)} disabled={!state.workspace}>
@@ -954,7 +989,7 @@ export function App() {
       </footer>
 
       {modal?.kind === 'import' && <ImportModal onClose={() => setModal(null)} onImported={(r) => void onImported(r)} />}
-      {modal?.kind === 'settings' && <SettingsModal onImport={() => setModal({ kind: 'import' })} onClose={() => setModal(null)} onSaved={setSettings} />}
+      {modal?.kind === 'settings' && <SettingsModal initialTab={modal.section} onImport={() => setModal({ kind: 'import' })} onClose={() => setModal(null)} onSaved={setSettings} />}
       {modal?.kind === 'cookies' && <CookiesModal onClose={() => setModal(null)} />}
       {modal?.kind === 'mock' && state.workspace && (
         <CreateMockModal

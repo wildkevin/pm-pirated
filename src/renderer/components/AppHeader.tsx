@@ -1,9 +1,9 @@
+import { useShortcutLabel } from '../settings'
 import { ArrowLeft, ArrowRight, ChevronDown, Folder, FolderOpen, LayoutGrid, Search, Settings as SettingsIcon } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { TreeNode, WorkspaceInfo } from '../../shared/format/types'
 import type { WorkspaceListItem } from '../../shared/ipc'
 import { methodClass, methodLabel } from '../lib/methods'
-import { mod } from '../lib/misc'
 import logo from '../../../build/icon.png'
 
 export interface SearchHit {
@@ -37,14 +37,15 @@ interface Props {
 
 /** Postman 12's top bar: navigation, workspace switcher, search (Ctrl+K), settings. */
 export function AppHeader(p: Props) {
+  const shortcut = useShortcutLabel()
   const [menu, setMenu] = useState<DOMRect | null>(null)
   return (
     <header className="header">
       <img src={logo} alt="PM Local" title="PM Local" className="brand-logo" />
-      <button className="btn-icon header-nav" aria-label="Go back" title={`Go back (${mod}[)`} disabled={!p.canBack} onClick={p.onBack}>
+      <button className="btn-icon header-nav" aria-label="Go back" title={`Go back (${shortcut('back')})`} disabled={!p.canBack} onClick={p.onBack}>
         <ArrowLeft size={14} />
       </button>
-      <button className="btn-icon header-nav" aria-label="Go forward" title={`Go forward (${mod}])`} disabled={!p.canForward} onClick={p.onForward}>
+      <button className="btn-icon header-nav" aria-label="Go forward" title={`Go forward (${shortcut('forward')})`} disabled={!p.canForward} onClick={p.onForward}>
         <ArrowRight size={14} />
       </button>
       <button
@@ -76,7 +77,7 @@ export function AppHeader(p: Props) {
       <button className="search-bar" aria-label="Search" disabled={!p.workspace} onClick={() => p.setSearchOpen(true)}>
         <Search size={12} />
         <span>Search</span>
-        <span className="search-kbd">({mod}K)</span>
+        <span className="search-kbd">({shortcut('search')})</span>
       </button>
       <span className="header-spacer" />
       <button className="btn-icon header-nav" aria-label="Settings" title="Settings" onClick={p.onSettings}>

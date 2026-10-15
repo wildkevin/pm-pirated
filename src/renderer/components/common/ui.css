@@ -35,3 +35,16 @@
 .cookie-chip .cookie-edit { border: 0; background: transparent; color: inherit; cursor: pointer; min-width: 90px; padding: 8px 14px; text-align: left; border-radius: 12px; }
 .cookie-chip > .btn-icon { border-left: 1px solid var(--border-strong); border-radius: 0 12px 12px 0; }
 @media (max-width: 720px) { .settings-tabs { flex-basis: 120px; padding: 10px 6px; } .settings-body { padding: 18px 16px; } .settings-modal .setting-row { gap: 12px; } .settings-font { width: 180px; } }
+
+.shortcut-controls { display: flex; align-items: center; gap: 20px; }
+.shortcut-row { display: flex; gap: 12px; align-items: center; min-height: 42px; padding: 4px 8px; border-radius: 4px; }
+.shortcut-row:hover { background: var(--bg-hover); }
+.shortcut-row.recording { background: var(--bg-selected); }
+.shortcut-name, .shortcut-binding { background: transparent; border: 0; cursor: pointer; padding: 6px 0; color: inherit; }
+.shortcut-name { flex: 1; text-align: left; }
+.shortcut-binding { flex: none; }
+.shortcut-binding kbd { padding: 4px 8px; background: var(--bg-hover); border: 1px solid var(--border-strong); border-radius: 4px; color: var(--content-primary); }
+.shortcut-recording { flex: 0 1 250px; min-width: 0; }
+.shortcut-input { width: 100%; text-align: right; }
+.shortcut-reset { flex: none; }
+.shortcut-row .form-error { display: block; margin-top: 6px; }

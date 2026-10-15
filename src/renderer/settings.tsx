@@ -1,9 +1,14 @@
+import { displayBinding, type ShortcutId } from '../shared/shortcuts'
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
 import { DEFAULT_SETTINGS, type AppSettingsData, type ThemeName } from '../shared/settings'
 
 const SettingsContext = createContext(DEFAULT_SETTINGS)
 export const VariableNamesContext = createContext<string[]>([])
 export const useSettings = () => useContext(SettingsContext)
+export function useShortcutLabel() {
+  const settings = useSettings()
+  return (id: ShortcutId) => settings.ui.shortcuts && settings.shortcutBindings[id] ? displayBinding(settings.shortcutBindings[id], /Mac/.test(navigator.platform)) : ''
+}
 
 // Palette values remain CSS tokens so every surface, including popovers, follows the theme.
 export const palettes: Record<ThemeName, [string, string, string, string, string, string]> = {

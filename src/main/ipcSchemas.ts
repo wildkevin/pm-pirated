@@ -1,3 +1,4 @@
+import { SHORTCUTS, DEFAULT_SHORTCUTS, bindingError, type ShortcutBindings } from '../shared/shortcuts'
 import { DEFAULT_SETTINGS, THEMES } from '../shared/settings'
 import { z } from 'zod'
 import type { Api } from '../shared/ipc'
@@ -30,9 +31,17 @@ const uiState = z.object({
 })
 
 const userPass = z.object({ enabled: z.boolean(), username: z.string(), password: z.string() })
+const shortcutBindings = z.object(Object.fromEntries(SHORTCUTS.map(([id]) => [id, z.string().max(100).default(DEFAULT_SHORTCUTS[id])])))
+  .superRefine((values, ctx) => {
+    for (const [id] of SHORTCUTS) {
+      const error = bindingError(id, values[id], values as ShortcutBindings)
+      if (error) ctx.addIssue({ code: 'custom', path: [id], message: error })
+    }
+  })
 const settings = z.object({
+  shortcutBindings: shortcutBindings.default(DEFAULT_SHORTCUTS),
   recentWorkspaces: z.array(z.string()),
-  zoomLevel: z.number().min(-5).max(5),
+  zoomLevel: z.number().min(-3.8).max(6),
   general: z.object({
     httpVersion: z.enum(['auto', 'http1', 'http2']).default('auto'),
     disableCookies: z.boolean().default(false),
@@ -133,6 +142,8 @@ export const ARGS = {
   exportEnvironment: z.tuple([id]),
   getSettings: z.tuple([]),
   saveSettings: z.tuple([settings]),
+  setShortcutRecording: z.tuple([z.boolean()]),
+  adjustZoom: z.tuple([z.enum(['in', 'out', 'reset'])]),
   pickFile: z.tuple([z.string().max(200), z.boolean().optional()]),
   saveResponseBody: z.tuple([z.string().max(255), z.instanceof(Uint8Array)]),
   getOAuth2Token: z.tuple([z.record(z.string(), z.string().max(10_000))]),

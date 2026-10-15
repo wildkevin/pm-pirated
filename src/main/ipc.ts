@@ -19,7 +19,7 @@ import { getToken, parseCallback } from './oauth2'
 import { engineOptions } from './netconfig'
 import type { SecretStore } from './secrets'
 import type { AppSettings } from './settings'
-import { isTrustedUrl, rendererLocation } from './window'
+import { isTrustedUrl, rendererLocation, nextZoom } from './window'
 import { appendHistory, deleteHistory, listHistory } from './workspace/history'
 import * as store from './workspace/store'
 import { WorkspaceError } from './workspace/store'
@@ -315,9 +315,16 @@ export function registerIpc(deps: IpcDeps): void {
     },
 
     getSettings: async () => deps.settings.get(),
+    async setShortcutRecording(active) { deps.win.webContents.setIgnoreMenuShortcuts(active) },
+    async adjustZoom(direction) {
+      const zoomLevel = nextZoom(deps.win.webContents.getZoomLevel(), direction === 'in' ? '+' : direction === 'out' ? '-' : '0')!
+      deps.win.webContents.setZoomLevel(zoomLevel)
+      await deps.settings.save({ ...deps.settings.get(), zoomLevel })
+      return zoomLevel
+    },
     async saveSettings(s) {
       const certsChanged = JSON.stringify(deps.settings.get().certificates) !== JSON.stringify(s.certificates)
-      await deps.settings.save(s)
+      await deps.settings.save({ ...s, zoomLevel: deps.win.webContents.getZoomLevel(), recentWorkspaces: deps.settings.get().recentWorkspaces })
       if (certsChanged) caFile = deps.caBundle().catch(() => undefined)
     },
     getOAuth2Token: (config) =>

@@ -82,7 +82,7 @@ if (!app.requestSingleInstanceLock()) {
       if (zoomLevel !== settings.get().zoomLevel) void settings.save({ ...settings.get(), zoomLevel })
     }
     app.dock?.setIcon(icon)
-    Menu.setApplicationMenu(Menu.buildFromTemplate(applicationMenuTemplate(process.platform, !!process.env.ELECTRON_RENDERER_URL)))
+    Menu.setApplicationMenu(Menu.buildFromTemplate(applicationMenuTemplate(process.platform, !!process.env.ELECTRON_RENDERER_URL, saveZoom)))
     const win = createMainWindow(saveZoom, icon)
     // Copy buttons are permitted only in our trusted main renderer.
     session.defaultSession.setPermissionRequestHandler((wc, permission, callback, details) => {

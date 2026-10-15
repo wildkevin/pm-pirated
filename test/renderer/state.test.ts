@@ -220,3 +220,18 @@ it('retains unsaved mock edits across tab changes and clears dirty only on save 
   s = reducer(s, { type: 'saved', key, doc: activeTab(s)!.doc })
   expect(isDirty(activeTab(s)!)).toBe(false)
 })
+
+it('reopens closed drafts with unsaved text and clears closed history on workspace changes', () => {
+  let s = reducer(initialState, { type: 'openDraft', item: { name: 'Draft', request: { method: 'GET', url: 'https://example.test', header: [] } } })
+  s = reducer(s, { type: 'edit', key: s.activeKey!, patch: { url: 'https://example.test/edited' } })
+  const doc = s.tabs[0].doc, saved = s.tabs[0].saved
+  s = reducer(s, { type: 'close', key: s.activeKey! })
+  expect(s.tabs).toHaveLength(0)
+  s = reducer(s, { type: 'reopenClosed' })
+  expect(s.tabs[0].doc).toEqual(doc)
+  expect(s.tabs[0].saved).toBe(saved)
+  expect(isDirty(s.tabs[0])).toBe(true)
+  s = reducer(s, { type: 'close', key: s.activeKey! })
+  s = reducer(s, { type: 'workspace', workspace: { root: '/new', name: 'New', collections: [], environments: [] } })
+  expect(reducer(s, { type: 'reopenClosed' }).tabs).toHaveLength(0)
+})

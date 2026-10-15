@@ -168,6 +168,8 @@ export interface Api {
 
   // app
   getSettings(): Promise<AppSettingsData>
+  setShortcutRecording(active: boolean): Promise<void>
+  adjustZoom(direction: 'in' | 'out' | 'reset'): Promise<number>
   saveSettings(settings: AppSettingsData): Promise<void>
   /** Runs the OAuth 2.0 flow (login window for code/implicit grants) and returns the token. */
   getOAuth2Token(config: OAuth2Config): Promise<OAuth2Token>
@@ -277,6 +279,8 @@ export const CHANNELS = {
   exportEnvironment: 'export:environment',
   getSettings: 'settings:get',
   saveSettings: 'settings:save',
+  adjustZoom: 'settings:zoom',
+  setShortcutRecording: 'settings:shortcutRecording',
   pickFile: 'dialog:pickFile',
   saveResponseBody: 'dialog:saveResponse',
   getOAuth2Token: 'oauth2:getToken',

@@ -1,3 +1,4 @@
+import { useShortcutLabel } from '../../settings'
 import { ChevronDown, ChevronRight, FileText, Save } from 'lucide-react'
 import { useState } from 'react'
 import type { PmAuth, PmItem, PmRequest } from '../../../shared/format/types'
@@ -34,6 +35,7 @@ export interface RequestEditorProps {
 }
 
 export function RequestEditor(p: RequestEditorProps) {
+  const shortcut = useShortcutLabel()
   const [customMethod, setCustomMethod] = useState(false)
   const [section, setSection] = useState<Section>('params')
   const [sendMenu, setSendMenu] = useState<DOMRect | null>(null)
@@ -75,7 +77,7 @@ export function RequestEditor(p: RequestEditorProps) {
           <span className="editor-name">{item.name}</span>
         </span>
         <span className="save-group">
-          <button className={`btn btn-ghost save-main${dirty ? '' : ' clean'}`} onClick={p.onSave} title="Save (Ctrl+S)">
+          <button className={`btn btn-ghost save-main${dirty ? '' : ' clean'}`} onClick={p.onSave} title={`Save (${shortcut('save')})`}>
             <Save size={14} /> Save
           </button>
           <button className="btn btn-ghost save-more" aria-label="Save options" onClick={(e) => setSaveMenu(e.currentTarget.getBoundingClientRect())}>
@@ -109,7 +111,7 @@ export function RequestEditor(p: RequestEditorProps) {
           </button>
         ) : (
           <div className="send-group">
-            <button className="btn btn-send send-main" onClick={() => p.onSend()} disabled={!raw.trim()} title="Send (Ctrl+Enter)">
+            <button className="btn btn-send send-main" onClick={() => p.onSend()} disabled={!raw.trim()} title={`Send (${shortcut('send')})`}>
               Send
             </button>
             <button className="btn btn-send send-more" aria-label="Send options" disabled={!raw.trim()} onClick={(e) => setSendMenu(e.currentTarget.getBoundingClientRect())}>

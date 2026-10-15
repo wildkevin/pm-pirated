@@ -32,11 +32,11 @@ export function allowRendererPermission(permission: string, pageUrl: string, req
 }
 
 /** Leave close-tab accelerators to the renderer; production menus cannot reload away drafts. */
-export function applicationMenuTemplate(platform = process.platform, development = false): MenuItemConstructorOptions[] {
+export function applicationMenuTemplate(platform = process.platform, development = false, onZoom: (level: number) => void = () => undefined): MenuItemConstructorOptions[] {
   return [
     ...(platform === 'darwin' ? [{ label: 'PM Local', submenu: [{ role: 'about' }, { type: 'separator' }, { role: 'hide' }, { role: 'hideOthers' }, { role: 'unhide' }, { type: 'separator' }, { role: 'quit' }] } as MenuItemConstructorOptions] : [{ label: 'File', submenu: [{ role: 'quit' }] } as MenuItemConstructorOptions]),
     { label: 'Edit', submenu: [{ role: 'undo' }, { role: 'redo' }, { type: 'separator' }, { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'selectAll' }] },
-    { label: 'View', submenu: [{ role: 'resetZoom' }, { role: 'zoomIn' }, { role: 'zoomOut' }, { type: 'separator' }, { role: 'togglefullscreen' }, ...(development ? [{ type: 'separator' }, { role: 'reload' }, { role: 'toggleDevTools' }] as MenuItemConstructorOptions[] : [])] },
+    { label: 'View', submenu: [...([['Reset Zoom', '0'], ['Zoom In', '+'], ['Zoom Out', '-']] as const).map(([label, key]) => ({ label, click: (_item: Electron.MenuItem, window: Electron.BaseWindow | undefined) => { if (window instanceof BrowserWindow) { const level = nextZoom(window.webContents.getZoomLevel(), key)!; window.webContents.setZoomLevel(level); onZoom(level) } } })), { type: 'separator' }, { role: 'togglefullscreen' }, ...(development ? [{ type: 'separator' }, { role: 'reload' }, { role: 'toggleDevTools' }] as MenuItemConstructorOptions[] : [])] },
     { label: 'Window', submenu: [{ role: 'minimize' }, { role: 'zoom' }] },
   ]
 }
@@ -81,15 +81,6 @@ export function createMainWindow(onZoom: (level: number) => void = () => undefin
     if (!isTrustedUrl(url, loc)) e.preventDefault()
   })
   win.once('ready-to-show', () => win.show())
-  // Ctrl/Cmd + = / - / 0 zoom (Electron's menu only reacts to Ctrl+Shift+= on Windows).
-  win.webContents.on('before-input-event', (e, input) => {
-    if (input.type !== 'keyDown' || !(input.control || input.meta) || input.alt) return
-    const level = nextZoom(win.webContents.getZoomLevel(), input.code.startsWith('Numpad') ? input.code : input.key)
-    if (level === null) return
-    e.preventDefault()
-    win.webContents.setZoomLevel(level)
-    onZoom(level)
-  })
   // Let the renderer save open tabs (unsaved edits included) before the window goes away.
   let closing = false
   const reallyClose = () => {

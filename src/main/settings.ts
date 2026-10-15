@@ -1,3 +1,4 @@
+import { SHORTCUTS, bindingError } from '../shared/shortcuts'
 import { readFileSync } from 'node:fs'
 import { mkdir } from 'node:fs/promises'
 import { dirname } from 'node:path'
@@ -55,6 +56,8 @@ export class AppSettings {
     const range = (value: number, min: number, max: number, fallback: number) => Number.isInteger(value) && value >= min && value <= max ? value : fallback
     data.editor.fontSize = range(data.editor.fontSize, 8, 40, 12)
     data.editor.indentCount = range(data.editor.indentCount, 1, 8, 4)
+    // Drop invalid saved chords; retain deliberate unassignments and valid custom bindings.
+    for (const [id] of SHORTCUTS) if (bindingError(id, data.shortcutBindings[id], data.shortcutBindings)) data.shortcutBindings[id] = ''
     data.recentWorkspaces = data.recentWorkspaces.filter((s): s is string => typeof s === 'string')
     SECRET_FIELDS(data, (v) => {
       if (!v) return v

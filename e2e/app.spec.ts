@@ -382,14 +382,15 @@ test('performance test runs virtual users and reports metrics', async () => {
   await app.close()
 })
 
-test('zoom with Ctrl+= / Ctrl+- / Ctrl+0 is remembered; the sidebar can be hidden', async () => {
+test('zoom with platform Command/Ctrl shortcuts is remembered; the sidebar can be hidden', async () => {
   const userData = await temp('pml-ud-')
   const key = (app: ElectronApplication, keyCode: string) =>
     app.evaluate(({ BrowserWindow }, k) => {
-      // Real input path (before-input-event), unlike Playwright's synthetic key events.
+      // Exercise native Electron input with the same platform modifier shown in Settings.
       const wc = BrowserWindow.getAllWindows()[0].webContents
-      wc.sendInputEvent({ type: 'keyDown', keyCode: k, modifiers: ['control'] })
-      wc.sendInputEvent({ type: 'keyUp', keyCode: k, modifiers: ['control'] })
+      const modifiers: ('meta' | 'control')[] = process.platform === 'darwin' ? ['meta'] : ['control']
+      wc.sendInputEvent({ type: 'keyDown', keyCode: k, modifiers })
+      wc.sendInputEvent({ type: 'keyUp', keyCode: k, modifiers })
     }, keyCode)
   const zoom = (app: ElectronApplication) => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.getZoomLevel())
 

@@ -38,6 +38,7 @@ export interface Tab {
 export interface State {
   workspace: WorkspaceInfo | null
   tabs: Tab[]
+  closedTabs: Tab[]
   activeKey: string | null
   activeEnvironment: string | null
   error: string | null
@@ -49,6 +50,7 @@ export interface State {
 export const initialState: State = {
   workspace: null,
   tabs: [],
+  closedTabs: [],
   activeKey: null,
   activeEnvironment: null,
   error: null,
@@ -69,6 +71,7 @@ export type Action =
   | { type: 'activate'; key: string }
   | { type: 'pin'; key: string }
   | { type: 'toggleFavorite'; id: string }
+  | { type: 'reopenClosed' }
   | { type: 'close'; key: string }
   | { type: 'closeMany'; keys: string[] }
   /** A patch, not a full item: a stale render must not overwrite fields changed meanwhile (e.g. the name). */
@@ -101,6 +104,7 @@ export const tabTitle = (t: Tab) =>
 const mapTab = (s: State, match: (t: Tab) => boolean, f: (t: Tab) => Tab): State => ({
   ...s,
   tabs: s.tabs.map((t) => (match(t) ? f(t) : t)),
+  closedTabs: s.closedTabs.map(t => match(t) ? f(t) : t),
 })
 
 function closeTabs(s: State, gone: (t: Tab) => boolean): State {
@@ -141,7 +145,7 @@ export function reducer(s: State, a: Action): State {
         ? { ...s, workspace: a.workspace }
         : { ...initialState, workspace: a.workspace, nextKey: s.nextKey }
     case 'restore': {
-      let next: State = { ...s, tabs: [], activeKey: null, activeEnvironment: a.ui.activeEnvironment }
+      let next: State = { ...s, tabs: [], closedTabs: [], activeKey: null, activeEnvironment: a.ui.activeEnvironment }
       for (const t of a.ui.tabs) next = addTab(next, t.id, { kind: 'request', item: t.item }, t.saved ?? stableStringify({ kind: 'request', item: t.item }))
       const active = next.tabs[a.ui.activeIndex] ?? next.tabs.at(-1)
       return { ...next, activeKey: active?.key ?? null, favorites: a.ui.favorites ?? [] }
@@ -174,17 +178,27 @@ export function reducer(s: State, a: Action): State {
       return { ...renamed, favorites: s.favorites.map((f) => (f === a.id ? a.newId : f)) }
     }
     case 'removed':
-      return { ...closeTabs(s, (t) => under(t.id, a.id)), favorites: s.favorites.filter((f) => f !== a.id) }
+      return { ...closeTabs(s, (t) => under(t.id, a.id)), closedTabs: s.closedTabs.filter(t => !under(t.id, a.id)), favorites: s.favorites.filter((f) => f !== a.id) }
     case 'pin':
       return mapTab(s, (t) => t.key === a.key, pinned)
     case 'toggleFavorite':
       return { ...s, favorites: s.favorites.includes(a.id) ? s.favorites.filter((f) => f !== a.id) : [...s.favorites, a.id] }
     case 'activate':
       return { ...s, activeKey: a.key }
+    case 'reopenClosed': {
+      const last = s.closedTabs.at(-1)
+      if (!last) return s
+      const next = { ...s, closedTabs: s.closedTabs.slice(0, -1) }
+      const existing = last.id ? s.tabs.find(t => t.id === last.id && t.doc.kind === last.doc.kind) : undefined
+      if (existing) return { ...next, activeKey: existing.key }
+      return addTab(next, last.id, last.doc, last.saved)
+    }
     case 'close':
-      return closeTabs(s, (t) => t.key === a.key)
-    case 'closeMany':
-      return closeTabs(s, (t) => a.keys.includes(t.key))
+    case 'closeMany': {
+      const keys = a.type === 'close' ? [a.key] : a.keys
+      const gone = s.tabs.filter(t => keys.includes(t.key)).map(t => ({ ...t, sendId: undefined, preview: false }))
+      return { ...closeTabs(s, t => keys.includes(t.key)), closedTabs: [...s.closedTabs, ...gone].slice(-30) }
+    }
     case 'edit':
       return mapTab(
         s,
