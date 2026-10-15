@@ -156,3 +156,25 @@ describe('environments', () => {
     }
   })
 })
+
+describe('concurrent script changes (QA VAR-1 / RUN-1)', () => {
+  it('changes to several scopes at once all persist, and current-values.json stays valid', async () => {
+    const env = await createEnvironment(root, 'Dev')
+    const col = await createCollection(root, 'Col')
+    for (let i = 0; i < 25; i++) {
+      await Promise.all([
+        vars.applyChanges(`env:${env}`, [{ key: 'counter', value: `e${i}` }]),
+        vars.applyChanges(`col:${col}`, [{ key: 'cv', value: `c${i}` }]),
+        vars.applyChanges('globals', [{ key: 'gv', value: `g${i}` }]),
+      ])
+      const all = JSON.parse(await readFile(join(root, '.pmlocal', 'current-values.json'), 'utf8'))
+      expect(all).toEqual({ [`env:${env}`]: { counter: `e${i}` }, [`col:${col}`]: { cv: `c${i}` }, globals: { gv: `g${i}` } })
+    }
+  })
+
+  it('keeps a copy of a damaged current-values.json instead of silently losing it', async () => {
+    await writeFile(join(root, '.pmlocal', 'current-values.json'), '{"globals": {"a": "1"}}garbage')
+    await vars.applyChanges('globals', [{ key: 'b', value: '2' }])
+    expect(await readFile(join(root, '.pmlocal', 'current-values.json.corrupt'), 'utf8')).toContain('garbage')
+  })
+})

@@ -33,13 +33,22 @@ export class SecretStore {
     }
   }
 
+  // Writes are queued so an older snapshot can never land on disk after a newer one.
+  private writing: Promise<void> = Promise.resolve()
+
   async setMany(entries: Record<string, string | undefined>): Promise<void> {
     for (const [k, v] of Object.entries(entries)) {
       if (v === undefined) delete this.data[k]
       else this.data[k] = this.crypt.encrypt(v)
     }
-    await mkdir(dirname(this.file), { recursive: true })
-    await writeFileAtomic(this.file, stableStringify(this.data))
+    const snapshot = stableStringify(this.data)
+    const write = async () => {
+      await mkdir(dirname(this.file), { recursive: true })
+      await writeFileAtomic(this.file, snapshot)
+    }
+    const done = this.writing.then(write, write)
+    this.writing = done.catch(() => undefined)
+    return done
   }
 
   /** Re-keys every secret under `from` to `to` (scope renamed). Values stay encrypted as they are. */

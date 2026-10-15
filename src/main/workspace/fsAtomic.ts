@@ -1,10 +1,12 @@
 import { rename, rm, writeFile } from 'node:fs/promises'
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+let seq = 0
 
 /** Writes via a temp file + rename so a crash never leaves a half-written file. */
 export async function writeFileAtomic(file: string, data: string): Promise<void> {
-  const tmp = `${file}.${process.pid}.${Date.now()}.tmp`
+  // Unique per call: two writes in the same millisecond must not share (and corrupt) one temp file.
+  const tmp = `${file}.${process.pid}.${Date.now()}.${++seq}.tmp`
   await writeFile(tmp, data, 'utf8')
   // Windows: antivirus or the file watcher can briefly lock the target; retry a few times.
   for (let attempt = 0; ; attempt++) {

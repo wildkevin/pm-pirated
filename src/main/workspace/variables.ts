@@ -6,7 +6,7 @@
 // which a shared file could forge), and are moved explicitly when an environment/collection is renamed.
 import { randomUUID } from 'node:crypto'
 import { lstatSync } from 'node:fs'
-import { mkdir, readdir, readFile, rename, rm } from 'node:fs/promises'
+import { copyFile, mkdir, readdir, readFile, rename, rm } from 'node:fs/promises'
 import { basename, dirname, join, resolve } from 'node:path'
 import { sanitizeName, uniqueName } from '../../shared/format/names'
 import { stableStringify } from '../../shared/format/stableJson'
@@ -96,6 +96,14 @@ export class Variables {
   ) {}
 
   private currentFile = () => join(this.root, '.pmlocal', 'current-values.json')
+  // current-values.json is shared by every scope and updated read-modify-write: one change at a time,
+  // or concurrent changes (e.g. a script setting a global and a collection variable) overwrite each other.
+  private queue: Promise<unknown> = Promise.resolve()
+  private exclusive<T>(fn: () => Promise<T>): Promise<T> {
+    const next = this.queue.then(fn, fn)
+    this.queue = next.catch(() => undefined)
+    return next
+  }
   private secretPrefix = (scope: ScopeRef) => `${this.root}::${scope}::`
   private secretKey = (scope: ScopeRef, key: string, which: 'initial' | 'current') =>
     `${this.secretPrefix(scope)}${encodeURIComponent(key)}::${which}`
@@ -103,7 +111,9 @@ export class Variables {
   private async readCurrent(): Promise<Record<string, Record<string, string>>> {
     try {
       return await readJsonFile(this.currentFile())
-    } catch {
+    } catch (e) {
+      // Damaged file: keep a copy before the next write replaces it, so the values can be recovered.
+      if (!isEnoent(e)) await copyFile(this.currentFile(), `${this.currentFile()}.corrupt`).catch(() => undefined)
       return {}
     }
   }
@@ -129,7 +139,11 @@ export class Variables {
     })
   }
 
-  async write(scope: ScopeRef, rows: VariableRow[]): Promise<void> {
+  write(scope: ScopeRef, rows: VariableRow[]): Promise<void> {
+    return this.exclusive(() => this.writeNow(scope, rows))
+  }
+
+  private async writeNow(scope: ScopeRef, rows: VariableRow[]): Promise<void> {
     const sf = scopeFile(this.root, scope)
     const doc = await this.readDoc(sf)
     const previous = sf.vars(doc)
@@ -168,7 +182,11 @@ export class Variables {
   }
 
   /** Persist what scripts did: changed values become current values; new keys are added; unset keys removed. */
-  async applyChanges(scope: ScopeRef, after: PmVariable[]): Promise<void> {
+  applyChanges(scope: ScopeRef, after: PmVariable[]): Promise<void> {
+    return this.exclusive(() => this.applyNow(scope, after))
+  }
+
+  private async applyNow(scope: ScopeRef, after: PmVariable[]): Promise<void> {
     const rows = await this.read(scope)
     const byKey = new Map(after.map((v) => [v.key, v.value]))
     let changed = false
@@ -189,11 +207,15 @@ export class Variables {
       changed = true
       next.push({ key, type: 'default', initial: '', current: value, enabled: true })
     }
-    if (changed) await this.write(scope, next)
+    if (changed) await this.writeNow(scope, next)
   }
 
   /** The scope's file was renamed/moved: carry its local current values and secrets along. */
-  async move(from: ScopeRef, to: ScopeRef): Promise<void> {
+  move(from: ScopeRef, to: ScopeRef): Promise<void> {
+    return this.exclusive(() => this.moveNow(from, to))
+  }
+
+  private async moveNow(from: ScopeRef, to: ScopeRef): Promise<void> {
     if (from === to) return
     const all = await this.readCurrent()
     if (all[from]) {
@@ -205,13 +227,15 @@ export class Variables {
   }
 
   /** Forget local current values and secrets of a deleted scope. */
-  async forget(scope: ScopeRef): Promise<void> {
-    const all = await this.readCurrent()
-    if (all[scope]) {
-      delete all[scope]
-      await writeFileAtomic(this.currentFile(), stableStringify(all))
-    }
-    await this.secrets.deletePrefix(this.secretPrefix(scope))
+  forget(scope: ScopeRef): Promise<void> {
+    return this.exclusive(async () => {
+      const all = await this.readCurrent()
+      if (all[scope]) {
+        delete all[scope]
+        await writeFileAtomic(this.currentFile(), stableStringify(all))
+      }
+      await this.secrets.deletePrefix(this.secretPrefix(scope))
+    })
   }
 }
 
