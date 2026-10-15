@@ -30,6 +30,12 @@ describe('OAuth 2.0 helpers', () => {
     expect(new URL(buildAuthUrl({ ...cfg, grant_type: 'implicit' })).searchParams.get('response_type')).toBe('token')
   })
 
+  it('refuses non-web URLs (file://, custom schemes)', () => {
+    expect(() => buildAuthUrl({ ...cfg, authUrl: 'file:///etc/passwd' })).toThrow(/http\(s\)/)
+    expect(() => tokenRequest({ ...cfg, accessTokenUrl: 'file:///C:/Users/me/secret.txt' }, {})).toThrow(/http\(s\)/)
+    expect(() => tokenRequest({ ...cfg, accessTokenUrl: 'not a url' }, {})).toThrow(/not a valid URL/)
+  })
+
   it('creates a valid S256 PKCE pair', () => {
     const { verifier, challenge } = pkcePair()
     expect(verifier).toMatch(/^[A-Za-z0-9_-]{43}$/)

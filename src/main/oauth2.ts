@@ -10,9 +10,21 @@ export function pkcePair(method: 'S256' | 'plain' = 'S256'): { verifier: string;
   return { verifier, challenge }
 }
 
+/** Only web URLs: net.fetch/loadURL would otherwise also read file:// and custom schemes. */
+function webUrl(value: string | undefined, label: string): URL {
+  if (!value) throw new Error(`${label} is required`)
+  let u: URL
+  try {
+    u = new URL(value)
+  } catch {
+    throw new Error(`${label} is not a valid URL`)
+  }
+  if (u.protocol !== 'https:' && u.protocol !== 'http:') throw new Error(`${label} must be an http(s) URL`)
+  return u
+}
+
 export function buildAuthUrl(cfg: OAuth2Config, challenge?: string): string {
-  if (!cfg.authUrl) throw new Error('Auth URL is required')
-  const u = new URL(cfg.authUrl)
+  const u = webUrl(cfg.authUrl, 'Auth URL')
   u.searchParams.set('response_type', cfg.grant_type === 'implicit' ? 'token' : 'code')
   u.searchParams.set('client_id', cfg.clientId ?? '')
   if (cfg.redirect_uri) u.searchParams.set('redirect_uri', cfg.redirect_uri)
@@ -37,7 +49,7 @@ export function parseCallback(url: string, redirectUri: string): Record<string, 
 }
 
 export function tokenRequest(cfg: OAuth2Config, extra: Record<string, string>): { url: string; headers: Record<string, string>; body: string } {
-  if (!cfg.accessTokenUrl) throw new Error('Access Token URL is required')
+  const url = webUrl(cfg.accessTokenUrl, 'Access Token URL').toString()
   const params = new URLSearchParams(extra)
   const headers: Record<string, string> = { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' }
   if (cfg.scope && !extra.code) params.set('scope', cfg.scope)
@@ -47,7 +59,7 @@ export function tokenRequest(cfg: OAuth2Config, extra: Record<string, string>): 
   } else {
     headers.Authorization = `Basic ${Buffer.from(`${encodeURIComponent(cfg.clientId ?? '')}:${encodeURIComponent(cfg.clientSecret ?? '')}`).toString('base64')}`
   }
-  return { url: cfg.accessTokenUrl, headers, body: params.toString() }
+  return { url, headers, body: params.toString() }
 }
 
 export function parseToken(text: string, contentType: string): OAuth2Token {
