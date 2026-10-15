@@ -1,5 +1,7 @@
 node_modules/
 out/
 dist/
+test-results/
+playwright-report/
 .DS_Store
 docs/reference/private/
