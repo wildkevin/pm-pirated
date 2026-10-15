@@ -177,6 +177,13 @@ export interface Api {
   exportCaptureCa(): Promise<boolean>
   saveCaptured(exchange: CapturedExchange, parentId: string): Promise<Created>
 
+  // load testing
+  startLoadTest(config: LoadConfig): Promise<string>
+  stopLoadTest(runId: string): Promise<void>
+  listLoadTests(): Promise<LoadInfo[]>
+  readLoadTest(id: string): Promise<LoadRecord>
+  deleteLoadTest(id: string): Promise<void>
+
   // code snippets
   codeLanguages(): Promise<CodeLanguage[]>
   generateCode(requestId: string | null, item: PmItem, environmentId: string | null, language: string, variant: string): Promise<string>
@@ -194,11 +201,13 @@ export interface AppEvents {
   onRunnerEvent(cb: (e: RunnerEvent) => void): void
   onMockEvent(cb: (e: MockEvent) => void): void
   onCaptureEvent(cb: (e: CaptureEvent) => void): void
+  onLoadEvent(cb: (e: LoadEvent) => void): void
 }
 export const BEFORE_CLOSE = 'app:before-close'
 export const RUNNER_EVENT = 'runner:event'
 export const MOCK_EVENT = 'mocks:event'
 export const CAPTURE_EVENT = 'capture:event'
+export const LOAD_EVENT = 'load:event'
 export const CLOSE_READY = 'app:close-ready'
 
 export const CHANNELS = {
@@ -254,6 +263,11 @@ export const CHANNELS = {
   stopMock: 'mocks:stop',
   mockRoutes: 'mocks:routes',
   captureState: 'capture:state',
+  startLoadTest: 'load:start',
+  stopLoadTest: 'load:stop',
+  listLoadTests: 'load:list',
+  readLoadTest: 'load:read',
+  deleteLoadTest: 'load:delete',
   startCapture: 'capture:start',
   stopCapture: 'capture:stop',
   setCaptureOptions: 'capture:options',
@@ -331,3 +345,32 @@ export interface CaptureState {
 }
 
 export type CaptureEvent = { exchange: import('./engine').CapturedExchange; savedTo?: string } | { state: CaptureState }
+
+// --- Load testing ---
+
+export interface LoadConfig {
+  target: string
+  requestIds: string[]
+  environmentId: string | null
+  profile: import('../loadtest/profile').LoadProfile
+  dataFile: string | null
+}
+
+export interface LoadInfo {
+  id: string
+  name: string
+  startedAt: number
+  profile: import('../loadtest/profile').LoadProfile
+  summary: import('../loadtest/metrics').LoadSummary | null
+}
+
+export interface LoadRecord extends LoadInfo {
+  environment: string | null
+  ticks: import('../loadtest/metrics').Tick[]
+  error?: string
+}
+
+export type LoadEvent =
+  | { runId: string; tick: import('../loadtest/metrics').Tick }
+  | { runId: string; done: import('../loadtest/metrics').LoadSummary }
+  | { runId: string; error: string }

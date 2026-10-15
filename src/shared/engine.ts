@@ -236,3 +236,26 @@ export type FromProxy =
   | { type: 'reply'; id: string; result?: unknown; error?: string }
   | { type: 'capture'; exchange: CapturedExchange }
   | { type: 'upstream'; id: string; url: string }
+
+// --- Load testing ---
+
+export interface LoadSpec {
+  collection: Record<string, unknown>
+  environment?: { name: string; values: PmVariable[] }
+  globals: PmVariable[]
+  data: Record<string, unknown>[]
+  profile: import('../loadtest/profile').LoadProfile
+  cookieFile: string
+  workingDir: string
+  options: EngineOptions
+}
+
+export type LoadMethods = {
+  start: { params: { runId: string; spec: LoadSpec }; result: import('../loadtest/metrics').LoadSummary }
+  stop: { params: { runId: string }; result: void }
+}
+export type ToLoad = { type: 'call'; id: string; method: keyof LoadMethods; params: unknown } | { type: 'proxyReply'; id: string; proxy: ProxyJson | null }
+export type FromLoad =
+  | { type: 'reply'; id: string; result?: unknown; error?: string }
+  | { type: 'tick'; runId: string; tick: import('../loadtest/metrics').Tick }
+  | { type: 'proxy'; id: string; url: string }

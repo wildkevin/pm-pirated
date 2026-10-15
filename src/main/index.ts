@@ -2,7 +2,8 @@ import { app, safeStorage, session, utilityProcess } from 'electron'
 import { join } from 'node:path'
 import { safeStorageCrypt } from './crypto'
 import { CAPTURE_EVENT, MOCK_EVENT } from '../shared/ipc'
-import type { FromProxy, ToProxy, UpstreamProxy } from '../shared/engine'
+import type { FromLoad, FromProxy, ToLoad, ToProxy, UpstreamProxy } from '../shared/engine'
+import { LoadClient } from './loadtest'
 import { sessionProxyConfig, upstreamFor } from './capture'
 import { CaptureManager, ProxyClient } from './captureManager'
 import type { FromMocks, ToMocks } from '../shared/mock'
@@ -30,6 +31,16 @@ function forkMocks(): ChildProcess<ToMocks, FromMocks> {
 
 function forkProxy(): ChildProcess<ToProxy, FromProxy> {
   const child = utilityProcess.fork(join(__dirname, 'proxy.js'), [], { serviceName: 'PM Local Capture Proxy' })
+  return {
+    postMessage: (m) => child.postMessage(m),
+    onMessage: (cb) => child.on('message', cb),
+    onExit: (cb) => child.on('exit', cb),
+    kill: () => void child.kill(),
+  }
+}
+
+function forkLoad(): ChildProcess<ToLoad, FromLoad> {
+  const child = utilityProcess.fork(join(__dirname, 'loadtest.js'), [], { serviceName: 'PM Local Load Test' })
   return {
     postMessage: (m) => child.postMessage(m),
     onMessage: (cb) => child.on('message', cb),
@@ -89,7 +100,12 @@ if (!app.requestSingleInstanceLock()) {
     )
     const capture: CaptureManager = new CaptureManager(proxyClient, join(userData, 'proxy'), crypt, (e) => !win.isDestroyed() && win.webContents.send(CAPTURE_EVENT, e))
     void capture.init()
-    registerIpc({ win, settings, secrets, engine, mocks, capture, caBundle: () => writeCaBundle(join(userData, 'ca-bundle.pem'), settings.get()) })
+    const load = new LoadClient(
+      forkLoad,
+      (url) => systemProxyFor((u) => session.defaultSession.resolveProxy(u), url, settings.get()),
+      (code) => console.error(`Load test process exited with code ${code}`),
+    )
+    registerIpc({ win, settings, secrets, engine, mocks, capture, load, caBundle: () => writeCaBundle(join(userData, 'ca-bundle.pem'), settings.get()) })
     // Windows proxy settings must be given back before the app exits.
     let restored = false
     app.on('will-quit', (e) => {
@@ -107,6 +123,7 @@ if (!app.requestSingleInstanceLock()) {
     app.on('before-quit', () => {
       engine.dispose()
       mockClient.dispose()
+      load.dispose()
     })
   })
   app.on('window-all-closed', () => app.quit())

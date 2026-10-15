@@ -2,15 +2,16 @@ import { BrowserWindow, dialog, ipcMain, net } from 'electron'
 import { randomUUID } from 'node:crypto'
 import { readFile, writeFile } from 'node:fs/promises'
 import { isAbsolute, join, relative, resolve } from 'node:path'
-import type { CapturedExchange, RunnerSpec, SendSpec } from '../shared/engine'
+import type { CapturedExchange, LoadSpec, RunnerSpec, SendSpec } from '../shared/engine'
 import type { PmAuth } from '../shared/format/types'
 import { sanitizeName } from '../shared/format/names'
 import { stableStringify } from '../shared/format/stableJson'
 import { rawUrl } from '../shared/format/url'
-import { CHANNELS, RUNNER_EVENT, type Api, type ImportResult, type ResolvedVariable, type RunnerEvent, type RunRecord } from '../shared/ipc'
+import { CHANNELS, LOAD_EVENT, RUNNER_EVENT, type Api, type ImportResult, type LoadEvent, type LoadRecord, type ResolvedVariable, type RunnerEvent, type RunRecord } from '../shared/ipc'
 import type { EngineClient } from './engineClient'
 import { exchangeToItem, type CaptureManager } from './captureManager'
 import { codeLanguages, generateCode } from './codegen'
+import { deleteLoadRecord, listLoadRecords, readLoadRecord, saveLoadRecord, type LoadClient } from './loadtest'
 import { buildRoutes, createDefinition, deleteDefinition, readDefinitions, saveDefinition, type MockManager } from './mocks'
 import { ARGS } from './ipcSchemas'
 import { buildRunCollection, deleteRun, listRuns, previewData, readDataFile, readRun, redactRecord, saveRun } from './runner'
@@ -32,6 +33,7 @@ export interface IpcDeps {
   engine: EngineClient
   mocks: MockManager
   capture: CaptureManager
+  load: LoadClient
   /** Rebuilds the extra-CA bundle from settings; returns its path (or undefined). */
   caBundle(): Promise<string | undefined>
 }
@@ -69,6 +71,16 @@ export function registerIpc(deps: IpcDeps): void {
     const rel = relative(ws(), abs)
     if (pickedFiles.has(abs) || (rel && !rel.startsWith('..') && !isAbsolute(rel))) return abs
     throw new Error('Choose the data file with Select File')
+  }
+
+  // Load tests in progress: ticks stream to the window and are kept for the saved record.
+  const loads = new Map<string, LoadRecord>()
+  const sendLoad = (e: LoadEvent) => {
+    if (!deps.win.isDestroyed()) deps.win.webContents.send(LOAD_EVENT, e)
+  }
+  deps.load.onTick = (runId, tick) => {
+    loads.get(runId)?.ticks.push(tick)
+    sendLoad({ runId, tick })
   }
 
   // Collection runs in progress; results stream to the window and are saved when done.
@@ -327,6 +339,55 @@ export function registerIpc(deps: IpcDeps): void {
       return saveJson(deps.win, `${sanitizeName(record.name)}.postman_test_run.json`, record)
     },
     codeLanguages: async () => codeLanguages(),
+    async startLoadTest(config) {
+      const dir = ws()
+      const v = variables()
+      const runId = `${new Date().toISOString().replace(/[:.]/g, '-')}-${randomUUID().slice(0, 8)}`
+      const collection = await buildRunCollection(dir, config.target, config.requestIds)
+      collection.variable = await v.effective(`col:${store.collectionOf(config.target)}`)
+      const env = config.environmentId ? (await store.openWorkspace(dir)).environments.find((e) => e.id === config.environmentId) : undefined
+      const record: LoadRecord = {
+        id: runId,
+        name: (await store.readContainer(dir, config.target)).name,
+        startedAt: Date.now(),
+        profile: config.profile,
+        environment: env?.name ?? null,
+        summary: null,
+        ticks: [],
+      }
+      loads.set(runId, record)
+      const spec: LoadSpec = {
+        collection,
+        ...(env ? { environment: { name: env.name, values: await v.effective(`env:${env.id}`) } } : {}),
+        globals: await v.effective('globals'),
+        data: config.dataFile ? await readDataFile(dataFilePath(config.dataFile)) : [],
+        profile: config.profile,
+        cookieFile: cookieFile(),
+        workingDir: dir,
+        options: engineOptions(deps.settings.get(), await caFile),
+      }
+      void deps.load.call('start', { runId, spec }).then(
+        async (summary) => {
+          record.summary = summary
+          await saveLoadRecord(dir, record).catch(() => undefined)
+          loads.delete(runId)
+          sendLoad({ runId, done: summary })
+        },
+        async (e: Error) => {
+          record.error = e.message
+          await saveLoadRecord(dir, record).catch(() => undefined)
+          loads.delete(runId)
+          sendLoad({ runId, error: e.message })
+        },
+      )
+      return runId
+    },
+    async stopLoadTest(runId) {
+      await deps.load.call('stop', { runId })
+    },
+    listLoadTests: () => listLoadRecords(ws()),
+    readLoadTest: (id) => readLoadRecord(ws(), id),
+    deleteLoadTest: (id) => deleteLoadRecord(ws(), id),
     captureState: () => deps.capture.getState(),
     async startCapture(port, decrypt) {
       const bundle = await caFile

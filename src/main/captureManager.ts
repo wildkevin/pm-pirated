@@ -52,6 +52,14 @@ export class ProxyClient extends RpcClient<ProxyMethods, ToProxy, FromProxy> {
 
 const HIDE_ON_SAVE = /^(host|content-length|connection|proxy-connection|accept-encoding)$/i
 
+/**
+ * Captured text is data, not a template: `{{x}}` in a captured URL would otherwise be filled with your
+ * variables when re-sent (to a host a web page chose). Braces in the URL are percent-encoded (same
+ * meaning for servers).
+ */
+const neutralizeUrl = (url: string) => url.replace(/\{\{/g, '%7B%7B').replace(/\}\}/g, '%7D%7D')
+export const hasTemplate = (e: CapturedExchange) => e.requestBody.includes('{{') || e.requestHeaders.some((h) => h.value.includes('{{') || h.key.includes('{{'))
+
 /** A captured exchange as a request item (like Postman's capture → collection). */
 export function exchangeToItem(e: CapturedExchange): PmItem {
   const u = new URL(e.url)
@@ -61,7 +69,7 @@ export function exchangeToItem(e: CapturedExchange): PmItem {
     name: `${e.method} ${u.pathname}`,
     request: {
       method: e.method,
-      url: e.url,
+      url: neutralizeUrl(e.url),
       header: e.requestHeaders.filter((h) => !HIDE_ON_SAVE.test(h.key)),
       ...(e.requestBody ? { body: { mode: 'raw' as const, raw: e.requestBody, options: { raw: { language } } } } : {}),
     },
@@ -213,7 +221,8 @@ export class CaptureManager {
   private async captured(e: CapturedExchange) {
     let savedTo: string | undefined
     const dest = this.state.destination
-    if (this.root && !e.tunnel && !e.error && dest !== 'none') {
+    // Headers/bodies with {{ }} are only saved when the user chooses to (see neutralizeUrl).
+    if (this.root && !e.tunnel && !e.error && dest !== 'none' && !hasTemplate(e)) {
       const item = exchangeToItem(e)
       try {
         if (dest === 'history') {

@@ -21,6 +21,7 @@ export interface SidebarActions {
   remove(id: string, name: string): void
   exportCollection(id: string): void
   runCollection(id: string): void
+  loadTest(id: string): void
   // environments
   openVariables(scope: string, title: string): void
   createEnvironment(): void
@@ -193,6 +194,7 @@ function CollectionsPanel({ workspace, activeId, renamingId, actions }: Props) {
                   { label: 'Add folder', onClick: () => actions.createFolder(n.id) },
                   { label: 'Edit', onClick: () => actions.openContainer(n.id) },
                   { label: 'Run', onClick: () => actions.runCollection(n.id) },
+                  { label: 'Performance test', onClick: () => actions.loadTest(n.id) },
                   { label: 'Mock', onClick: () => actions.createMock(n.id) },
                 ]
               : []),

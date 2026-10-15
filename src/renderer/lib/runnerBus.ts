@@ -1,5 +1,5 @@
 import type { MockEvent } from '../../shared/mock'
-import type { CaptureEvent, RunnerEvent } from '../../shared/ipc'
+import type { CaptureEvent, LoadEvent, RunnerEvent } from '../../shared/ipc'
 
 // One IPC listener per event type for the whole app; views subscribe/unsubscribe here.
 function bus<E>(attach: (cb: (e: E) => void) => void) {
@@ -18,3 +18,4 @@ function bus<E>(attach: (cb: (e: E) => void) => void) {
 export const onRunnerEvent = bus<RunnerEvent>((cb) => window.api.onRunnerEvent(cb))
 export const onMockEvent = bus<MockEvent>((cb) => window.api.onMockEvent(cb))
 export const onCaptureEvent = bus<CaptureEvent>((cb) => window.api.onCaptureEvent(cb))
+export const onLoadEvent = bus<LoadEvent>((cb) => window.api.onLoadEvent(cb))

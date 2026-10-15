@@ -2040,3 +2040,64 @@ kbd {
 .capture-actions .select {
   height: 24px;
 }
+
+/* ---------- Charts & performance ---------- */
+.chart {
+  margin: 8px 0;
+}
+.chart svg {
+  width: 100%;
+  height: auto;
+  display: block;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-primary);
+}
+.chart-axis {
+  stroke: var(--border-strong);
+}
+.chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-top: 4px;
+  color: var(--content-secondary);
+  font-size: var(--text-s);
+}
+.chart-legend i {
+  display: inline-block;
+  width: 10px;
+  height: 3px;
+  margin-right: 4px;
+  vertical-align: middle;
+}
+.metric-cards {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin: 8px 0;
+}
+.metric-card {
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.metric-value {
+  font-size: 18px;
+  font-weight: 600;
+  margin-top: 2px;
+}
+.load-table {
+  margin-top: 8px;
+}
+.data-preview-left {
+  margin: 2px 0 8px;
+  font-size: var(--text-s);
+}
+.loadtest .runner-results {
+  overflow: auto;
+}
+.load-table td:first-child,
+.load-table th:first-child {
+  width: 30%;
+}

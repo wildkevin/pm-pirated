@@ -15,6 +15,8 @@ export type TabDoc =
   | { kind: 'mock'; title: string }
   /** Capture proxy (single tab, id 'capture'). */
   | { kind: 'capture' }
+  /** Performance (load) test (single tab, id 'load'). */
+  | { kind: 'load'; target: string }
 
 export interface Tab {
   /** Stable identity of the tab. Tab-level actions use it because `id` changes on rename. */
@@ -69,6 +71,7 @@ export type Action =
   | { type: 'setDoc'; key: string; doc: TabDoc }
   /** Opens the Runner tab (or retargets it). */
   | { type: 'openRunner'; target: string }
+  | { type: 'openLoad'; target: string }
   /** After saving; `id` is set when a draft was saved into a collection. */
   | { type: 'saved'; key: string; doc: TabDoc; id?: string }
   | { type: 'sendStart'; key: string; sendId: string }
@@ -78,7 +81,7 @@ export type Action =
 export const isDirty = (t: Tab) => stableStringify(t.doc) !== t.saved
 export const activeTab = (s: State) => s.tabs.find((t) => t.key === s.activeKey)
 export const tabTitle = (t: Tab) =>
-  t.doc.kind === 'request' ? t.doc.item.name : t.doc.kind === 'container' ? t.doc.container.name : t.doc.kind === 'variables' || t.doc.kind === 'mock' ? t.doc.title : t.doc.kind === 'capture' ? 'Capture' : 'Runner'
+  t.doc.kind === 'request' ? t.doc.item.name : t.doc.kind === 'container' ? t.doc.container.name : t.doc.kind === 'variables' || t.doc.kind === 'mock' ? t.doc.title : t.doc.kind === 'capture' ? 'Capture' : t.doc.kind === 'load' ? 'Performance' : 'Runner'
 
 const mapTab = (s: State, match: (t: Tab) => boolean, f: (t: Tab) => Tab): State => ({
   ...s,
@@ -184,6 +187,12 @@ export function reducer(s: State, a: Action): State {
       return mapTab(s, (t) => t.key === a.key && t.doc.kind === 'variables', (t) => ({ ...t, doc: { ...(t.doc as Extract<TabDoc, { kind: 'variables' }>), rows: a.rows } }))
     case 'setDoc':
       return mapTab(s, (t) => t.key === a.key, (t) => ({ ...t, doc: a.doc }))
+    case 'openLoad': {
+      const doc: TabDoc = { kind: 'load', target: a.target }
+      const existing = s.tabs.find((t) => t.doc.kind === 'load')
+      if (!existing) return addTab(s, 'load', doc)
+      return { ...mapTab(s, (t) => t.key === existing.key, (t) => ({ ...t, doc, saved: stableStringify(doc) })), activeKey: existing.key }
+    }
     case 'openRunner': {
       const doc: TabDoc = { kind: 'runner', target: a.target }
       const existing = s.tabs.find((t) => t.doc.kind === 'runner')

@@ -19,6 +19,7 @@ import { RequestEditor } from './components/request/RequestEditor'
 import { ResponseViewer } from './components/response/ResponseViewer'
 import { CreateMockModal, MockView } from './components/MockView'
 import { RunnerView } from './components/RunnerView'
+import { LoadTestView } from './components/LoadTestView'
 import { onCaptureEvent, onMockEvent } from './lib/runnerBus'
 import { CaptureView } from './components/CaptureView'
 import { Sidebar, type Panel, type SidebarActions } from './components/Sidebar'
@@ -328,6 +329,7 @@ export function App() {
       }),
     exportCollection: (id) => void run(() => window.api.exportCollection(id)),
     runCollection: (id) => dispatch({ type: 'openRunner', target: id }),
+    loadTest: (id) => dispatch({ type: 'openLoad', target: id }),
     openVariables: (scope, title) => void openVariables(scope, title),
     createEnvironment: () =>
       void run(async () => {
@@ -428,6 +430,17 @@ export function App() {
       )
     }
     const doc = active.doc
+    if (doc.kind === 'load') {
+      return (
+        <LoadTestView
+          workspace={state.workspace!}
+          target={doc.target}
+          onTarget={(target) => dispatch({ type: 'openLoad', target })}
+          activeEnvironment={state.activeEnvironment}
+          onError={fail}
+        />
+      )
+    }
     if (doc.kind === 'capture') {
       return (
         <CaptureView

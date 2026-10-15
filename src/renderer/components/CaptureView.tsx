@@ -52,7 +52,10 @@ export function CaptureView({ state, workspace, captured, onClear, onOpenInTab, 
     <div className="capture">
       <div className="capture-config">
         <div className="section-title">Capture requests</div>
-        <p className="muted">Point an app or browser at this proxy to record its requests. Only this computer can use it.</p>
+        <p className="muted">
+          Point an app or browser at this proxy to record its requests. Only this computer can use it; programs that use it also use your saved proxy
+          credentials (Settings &gt; Proxy) for the onward connection.
+        </p>
         <div className="form-row">
           <label className="field-label" htmlFor="cap-port">
             Port
