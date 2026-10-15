@@ -87,6 +87,16 @@ describe('collection import', () => {
   })
 })
 
+describe('export of stored URL objects', () => {
+  it('adds parsed host/path so the runtime and Postman can use them', async () => {
+    const { createCollection, createRequest } = await import('../../src/main/workspace/store')
+    const col = await createCollection(root, 'C')
+    await createRequest(root, col, 'R', { name: 'R', request: { method: 'DELETE', url: { raw: 'https://api.test/payments/:id', variable: [{ key: 'id', value: '7' }] }, header: [] } })
+    const out = await exportCollection(root, col)
+    expect(out.item[0].request.url).toMatchObject({ raw: 'https://api.test/payments/:id', host: ['api', 'test'], path: ['payments', ':id'], variable: [{ key: 'id', value: '7' }] })
+  })
+})
+
 describe('environments and globals', () => {
   it('imports an environment (secrets out of the file) and exports it back', async () => {
     const env = { id: 'x', name: 'Prod', values: [{ key: 'host', value: 'p.test', enabled: true }, { key: 'pw', value: 'hunter2', type: 'secret', enabled: true }], _postman_variable_scope: 'environment' }

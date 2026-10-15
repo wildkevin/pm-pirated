@@ -199,6 +199,15 @@ export async function curlToItem(text: string): Promise<PmItem> {
 
 // --- export ---
 
+/**
+ * Stored URLs with disabled params or path variables are `{raw, query, variable}`; v2.1 consumers (the
+ * runtime, Postman) read the parsed parts, so add them (host, path, …) from `raw`.
+ */
+function exportUrl(url: PmUrl): PmUrl {
+  if (typeof url === 'string') return url
+  return { ...Url.parse(url.raw), ...url }
+}
+
 async function exportTree(root: string, dirId: string, withIds: boolean): Promise<Json[]> {
   const abs = resolveInside(root, dirId)
   const isCollection = dirId.split('/').length === 2
@@ -216,7 +225,8 @@ async function exportTree(root: string, dirId: string, withIds: boolean): Promis
       const c = await readContainer(root, id)
       out.push({ ...(withIds ? { id } : {}), name: c.name, ...containerOf(c), item: await exportTree(root, id, withIds) })
     } else {
-      out.push({ ...(await readRequest(root, id)), ...(withIds ? { id } : {}) })
+      const item = await readRequest(root, id)
+      out.push({ ...item, request: { ...item.request, url: exportUrl(item.request.url) }, ...(withIds ? { id } : {}) })
     }
   }
   return out

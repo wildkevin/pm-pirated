@@ -3,6 +3,7 @@
 A local-only API client that looks and works like the Postman desktop app — no account, no cloud,
 no AI. Collections live as plain JSON files in a folder you choose, so you can keep them in git.
 
+Screenshots of every screen: [`docs/screenshots`](docs/screenshots/README.md) ·
 Design: [`docs/superpowers/specs/2026-10-15-pm-local-design.md`](docs/superpowers/specs/2026-10-15-pm-local-design.md) ·
 Visual reference: [`docs/reference/README.md`](docs/reference/README.md)
 
