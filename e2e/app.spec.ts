@@ -440,8 +440,10 @@ test('tab context menu closes others / left / right; URL text sits in the middle
   const box = (await page.locator('.url-group').boundingBox())!
   const line = (await page.locator('.var-input .cm-line').boundingBox())!
   expect(Math.abs(line.y + line.height / 2 - (box.y + box.height / 2))).toBeLessThan(2)
-  // Clicking the empty space below the text still focuses the input.
-  await page.mouse.click(box.x + box.width - 20, box.y + box.height - 3)
+  // Clicking the empty space below the text still focuses the input (element click: waits until stable).
+  const host = page.locator('.var-input')
+  const hb = (await host.boundingBox())!
+  await host.click({ position: { x: hb.width - 20, y: hb.height - 2 } })
   // The page's focused element (CI's background windows never match :focus, so no toBeFocused).
   await expect.poll(() => page.evaluate(() => document.activeElement?.getAttribute('aria-label'))).toBe('Request URL')
 

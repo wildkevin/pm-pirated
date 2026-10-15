@@ -121,7 +121,8 @@ if (!app.requestSingleInstanceLock()) {
     app.on('will-quit', (e) => {
       if (restored) return
       e.preventDefault()
-      void capture.shutdown().finally(() => {
+      // Also let pending settings writes (e.g. the zoom level saved on close) reach the disk.
+      void Promise.allSettled([capture.shutdown(), settings.flush()]).finally(() => {
         restored = true
         app.quit()
       })

@@ -61,12 +61,25 @@ export class AppSettings {
     return structuredClone(this.data)
   }
 
+  // Writes run one after another so a slow older write can never land after a newer one.
+  private writing: Promise<void> = Promise.resolve()
+
   async save(next: AppSettingsData): Promise<void> {
     this.data = merge(DEFAULT_SETTINGS, structuredClone(next))
     const onDisk = structuredClone(this.data)
     SECRET_FIELDS(onDisk, (v) => (v ? this.crypt.encrypt(v) : v))
-    await mkdir(dirname(this.file), { recursive: true })
-    await writeFileAtomic(this.file, stableStringify(onDisk))
+    const write = async () => {
+      await mkdir(dirname(this.file), { recursive: true })
+      await writeFileAtomic(this.file, stableStringify(onDisk))
+    }
+    const done = this.writing.then(write, write)
+    this.writing = done.catch(() => undefined)
+    return done
+  }
+
+  /** Resolves when every save requested so far is on disk (used before quitting). */
+  flush(): Promise<void> {
+    return this.writing
   }
 
   async forgetWorkspace(dir: string): Promise<void> {

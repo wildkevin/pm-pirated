@@ -53,6 +53,14 @@ describe('AppSettings', () => {
     expect(new AppSettings(join(dir, 's.json'), broken).get().proxy.auth.password).toBe('')
   })
 
+  it('rapid saves land in order: the last one wins on disk, and flush waits for it', async () => {
+    const file = join(await tmp(), 's.json')
+    const s = new AppSettings(file, fakeCrypt)
+    for (let i = 1; i <= 20; i++) void s.save({ ...s.get(), zoomLevel: i / 10 })
+    await s.flush()
+    expect(JSON.parse(await readFile(file, 'utf8')).zoomLevel).toBe(2)
+  })
+
   it('remembers recent workspaces, newest first, max 10', async () => {
     const s = new AppSettings(join(await tmp(), 'nested', 's.json'), fakeCrypt)
     for (let i = 0; i < 12; i++) await s.rememberWorkspace(`/w${i}`)
