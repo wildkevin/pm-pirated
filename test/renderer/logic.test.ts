@@ -33,10 +33,9 @@ describe('tab reducer', () => {
     let s = withTabs('a')
     const key = keyOf(s, 'a')
     expect(isDirty(s.tabs[0])).toBe(false)
-    const edited = { ...item('a'), request: { ...item('a').request, url: 'http://x' } }
-    s = reducer(s, { type: 'edit', key, item: edited })
+    s = reducer(s, { type: 'edit', key, patch: { url: 'http://x' } })
     expect(isDirty(s.tabs[0])).toBe(true)
-    s = reducer(s, { type: 'saved', key, item: edited })
+    s = reducer(s, { type: 'saved', key, item: s.tabs[0].item })
     expect(isDirty(s.tabs[0])).toBe(false)
   })
 
@@ -56,10 +55,9 @@ describe('tab reducer', () => {
     const key = keyOf(s, 'c/a')
     s = reducer(s, { type: 'sendStart', key, sendId: '1' })
     s = reducer(s, { type: 'renamed', id: 'c/a', newId: 'c/b', name: 'B' })
-    const edited = { ...s.tabs[0].item, request: { ...s.tabs[0].item.request, method: 'POST' } }
-    s = reducer(s, { type: 'edit', key, item: edited })
+    s = reducer(s, { type: 'edit', key, patch: { method: 'POST' } })
     s = reducer(s, { type: 'sendDone', key, sendId: '1', result: { ok: false, error: 'x' } })
-    expect(s.tabs[0]).toMatchObject({ id: 'c/b', item: { request: { method: 'POST' } }, response: { error: 'x' } })
+    expect(s.tabs[0]).toMatchObject({ id: 'c/b', item: { name: 'B', request: { method: 'POST' } }, response: { error: 'x' } })
   })
 
   it('renaming a folder updates the ids of tabs inside it only', () => {

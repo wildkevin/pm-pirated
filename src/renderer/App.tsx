@@ -1,7 +1,6 @@
 import { Allotment } from 'allotment'
 import { FolderOpen } from 'lucide-react'
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react'
-import type { PmItem } from '../shared/format/types'
 import { RequestEditor } from './components/RequestEditor'
 import { ResponseViewer } from './components/ResponseViewer'
 import { Sidebar } from './components/Sidebar'
@@ -164,7 +163,7 @@ export function App() {
                     <Allotment.Pane minSize={160}>
                       <RequestEditor
                         tab={active}
-                        onChange={(item: PmItem) => dispatch({ type: 'edit', key: active.key, item })}
+                        onChange={(patch) => dispatch({ type: 'edit', key: active.key, patch })}
                         onSend={() => send(active)}
                         onCancel={() => cancel(active)}
                         onSave={() => void save(active)}

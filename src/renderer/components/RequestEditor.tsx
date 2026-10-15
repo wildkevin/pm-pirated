@@ -1,12 +1,12 @@
 import { Save, Trash2 } from 'lucide-react'
 import { useState } from 'react'
-import type { PmBody, PmHeader, PmItem } from '../../shared/format/types'
+import type { PmBody, PmHeader, PmRequest } from '../../shared/format/types'
 import { METHODS, methodClass } from '../lib/methods'
 import type { Tab } from '../state'
 
 interface Props {
   tab: Tab
-  onChange(item: PmItem): void
+  onChange(patch: Partial<PmRequest>): void
   onSend(): void
   onCancel(): void
   onSave(): void
@@ -18,7 +18,7 @@ export function RequestEditor({ tab, onChange, onSend, onCancel, onSave }: Props
   const [section, setSection] = useState<Section>('headers')
   const { item } = tab
   const req = item.request
-  const setRequest = (patch: Partial<PmItem['request']>) => onChange({ ...item, request: { ...req, ...patch } })
+  const setRequest = onChange
   const activeHeaders = req.header.filter((h) => !h.disabled && h.key).length
   const sending = !!tab.sendId
 

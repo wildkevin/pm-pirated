@@ -1,6 +1,6 @@
 import type { SendResult } from '../shared/engine'
 import { stableStringify } from '../shared/format/stableJson'
-import type { PmItem, WorkspaceInfo } from '../shared/format/types'
+import type { PmItem, PmRequest, WorkspaceInfo } from '../shared/format/types'
 
 export interface Tab {
   /** Stable identity of the tab. Tab-level actions use it because `id` changes on rename. */
@@ -33,7 +33,8 @@ export type Action =
   // Tab-level actions (addressed by tab key)
   | { type: 'activate'; key: string }
   | { type: 'close'; key: string }
-  | { type: 'edit'; key: string; item: PmItem }
+  /** A patch, not a full item: a stale render must not overwrite fields changed meanwhile (e.g. the name). */
+  | { type: 'edit'; key: string; patch: Partial<PmRequest> }
   | { type: 'saved'; key: string; item: PmItem }
   | { type: 'sendStart'; key: string; sendId: string }
   | { type: 'sendDone'; key: string; sendId: string; result: SendResult }
@@ -99,7 +100,7 @@ export function reducer(s: State, a: Action): State {
     case 'close':
       return closeTabs(s, (t) => t.key === a.key)
     case 'edit':
-      return mapTab(s, (t) => t.key === a.key, (t) => ({ ...t, item: a.item }))
+      return mapTab(s, (t) => t.key === a.key, (t) => ({ ...t, item: { ...t.item, request: { ...t.item.request, ...a.patch } } }))
     case 'saved':
       return mapTab(s, (t) => t.key === a.key, (t) => ({ ...t, saved: stableStringify(a.item) }))
     case 'sendStart':
