@@ -10,8 +10,9 @@ async function fixture() {
     await mkdir(dir)
     await writeFile(join(dir, 'workspace.json'), JSON.stringify({ name, formatVersion: 1 }))
   }
-  const app = await electron.launch({ args: ['.'], env: { ...process.env, PM_LOCAL_USER_DATA: join(root, 'appdata') } })
-  const page = await app.firstWindow()
+  const launch = () => electron.launch({ args: ['.'], env: { ...process.env, PM_LOCAL_USER_DATA: join(root, 'appdata') } })
+  let app = await launch()
+  let page = await app.firstWindow()
   await app.evaluate(({ dialog }, dir) => { dialog.showOpenDialog = (async () => ({ canceled: false, filePaths: [dir] })) as typeof dialog.showOpenDialog }, b)
   await page.getByRole('button', { name: 'Open an existing workspace folder…' }).click()
   await expect(page.getByRole('button', { name: 'Create new', exact: true })).toBeVisible()
@@ -22,7 +23,10 @@ async function fixture() {
     const { id } = await window.api.createCollection('Collection')
     await window.api.createRequest(id, 'Saved request')
   })
-  await page.reload()
+  // Finish setup and its pending persistence before testing the newly selected workspace.
+  await app.close()
+  app = await launch()
+  page = await app.firstWindow()
   await expect(page.getByRole('treeitem').filter({ hasText: 'Collection' }).first()).toBeVisible()
   return { root, a, b, app, page }
 }
@@ -101,6 +105,55 @@ test('workspace stays in loading state until saved tabs finish restoring', async
     await expect(page.getByLabel('Request URL')).toBeFocused()
     await page.getByLabel('Request URL').fill('https://example.test/restored')
     await expect(page.getByLabel('Request URL')).toHaveText('https://example.test/restored')
+  } finally { await app.close() }
+})
+
+test('environment selector shows its default label and can be widened by dragging', async ({}, testInfo) => {
+  const { app, page } = await fixture()
+  try {
+    await resize(app, 1440, 800)
+    const picker = page.getByLabel('Environment', { exact: true })
+    const handle = page.getByRole('separator', { name: 'Resize environment selector' })
+    const labelFits = () => picker.evaluate((element) => {
+      const select = element as HTMLSelectElement, style = getComputedStyle(select)
+      const context = document.createElement('canvas').getContext('2d')!
+      context.font = style.font
+      return context.measureText(select.selectedOptions[0].text).width + parseFloat(style.paddingLeft) + parseFloat(style.paddingRight) + 20 <= select.clientWidth
+    })
+    await expect.poll(labelFits).toBe(true)
+    const before = await page.locator('.env-selector').boundingBox()
+    const grip = (await handle.boundingBox())!
+    await page.mouse.move(grip.x + grip.width / 2, grip.y + grip.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(grip.x + grip.width / 2 - 180, grip.y + grip.height / 2, { steps: 12 })
+    await page.mouse.up()
+    await expect.poll(async () => (await page.locator('.env-selector').boundingBox())!.width).toBeGreaterThan(before!.width + 160)
+    const width = (await page.locator('.env-selector').boundingBox())!.width
+    const name = 'Staging – Payments API Integration'
+    await page.evaluate((name) => window.api.createEnvironment(name), name)
+    await page.reload()
+    await expect(picker).toBeVisible()
+    await picker.selectOption({ label: name })
+    await expect.poll(async () => (await page.locator('.env-selector').boundingBox())!.width).toBe(width)
+    await expect.poll(labelFits).toBe(true)
+    await handle.focus()
+    await page.keyboard.press('ArrowRight')
+    await expect(handle).toHaveAttribute('aria-valuenow', String(width - 16))
+    const expanded = (await handle.boundingBox())!
+    await page.mouse.move(expanded.x + expanded.width / 2, expanded.y + expanded.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(expanded.x + 600, expanded.y + expanded.height / 2, { steps: 12 })
+    await page.mouse.up()
+    await expect(handle).toHaveAttribute('aria-valuenow', '64')
+    await expect(page.locator('.env-picker.compact svg')).toBeVisible()
+    await picker.selectOption({ label: 'No Environment' })
+    await expect(picker).toHaveValue('')
+    await handle.focus()
+    await page.keyboard.press('End')
+    await expect.poll(labelFits).toBe(true)
+    await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))))
+    const png = await app.evaluate(async ({ BrowserWindow }) => (await BrowserWindow.getAllWindows()[0].webContents.capturePage()).toPNG().toString('base64'))
+    await writeFile(testInfo.outputPath('environment-selector.png'), Buffer.from(png, 'base64'))
   } finally { await app.close() }
 })
 

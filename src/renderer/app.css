@@ -3055,13 +3055,22 @@ kbd {
 .workbench, .workbench-content, .request-area, .request-main { min-width: 0; }
 .tabs-row { container-type: inline-size; }
 .tabs { position: relative; scroll-padding-inline: 2px; }
-.tab { min-width: 120px; max-width: 170px; }
+.tab { flex: 0 1 170px; min-width: 80px; max-width: 170px; }
 .tab-new, .tabs-list-btn { flex-shrink: 0; }
 .tab-title { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
-.env-selector { flex: 0 1 150px; min-width: 85px; }
-.env-selector .env-select { width: 100%; min-width: 0; }
+.env-selector { flex: none; min-width: 64px; height: 100%; }
+.env-picker { flex: 1; min-width: 0; position: relative; height: 24px; border-radius: 6px; }
+.env-picker:hover { background: var(--bg-hover); }
+.env-picker:focus-within { outline: 1px solid var(--brand); }
+.env-selector .env-select { position: absolute; inset: 0; width: 100%; height: 100%; min-width: 0; max-width: none; opacity: 0; cursor: pointer; }
+.env-display { display: flex; align-items: center; gap: 8px; height: 100%; padding: 0 8px; pointer-events: none; }
+.env-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.env-display svg { flex: none; }
+.env-picker.compact .env-display { padding: 0; justify-content: center; }
+.env-resize { position: absolute; left: -4px; top: 0; bottom: 0; width: 8px; z-index: 1; cursor: col-resize; touch-action: none; }
+.env-resize::after { content: ''; position: absolute; left: 3px; top: 0; bottom: 0; width: 2px; border-radius: 2px; }
+.env-resize:hover::after, .env-resize:focus-visible::after { background: var(--brand); }
 @container (max-width: 650px) {
-  .env-selector { flex-basis: 110px; }
   .tab { width: 140px; padding-inline: 14px 24px; }
 }
 .subtabs { overflow-x: auto; scrollbar-width: thin; }
