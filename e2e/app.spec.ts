@@ -384,10 +384,12 @@ test('zoom with Ctrl+= / Ctrl+- / Ctrl+0 is remembered; the sidebar can be hidde
   await key(app, '=')
   await key(app, '-')
   await expect.poll(() => zoom(app)).toBe(0.5)
+  // The pane stays in the DOM at zero width when hidden.
+  const sidebarWidth = async () => (await page.locator('.sidebar').boundingBox())?.width ?? 0
   await page.getByRole('button', { name: 'Hide sidebar' }).click()
-  await expect(page.getByRole('button', { name: 'New collection' })).toBeHidden()
+  await expect.poll(sidebarWidth).toBeLessThan(2)
   await page.getByRole('button', { name: 'Show sidebar' }).click()
-  await expect(page.getByRole('button', { name: 'New collection' })).toBeVisible()
+  await expect.poll(sidebarWidth).toBeGreaterThan(200)
   await app.close()
 
   app = await launch(userData)
