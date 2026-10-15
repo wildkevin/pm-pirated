@@ -37,7 +37,12 @@ describe('tab reducer', () => {
 
   it('renaming re-keys the tab and does not make a clean tab dirty', () => {
     const s = reducer(withTabs('c/a'), { type: 'renamed', id: 'c/a', newId: 'c/b', name: 'New' })
+    const key = s.tabs[0].key
     expect(s.tabs[0]).toMatchObject({ id: 'c/b', item: { name: 'New' } })
+    // A new request created at the old path must not reuse the renamed tab's key.
+    const s2 = reducer(s, { type: 'open', id: 'c/a', item: item('c/a') })
+    expect(new Set(s2.tabs.map((t) => t.key)).size).toBe(2)
+    expect(s2.tabs[0].key).toBe(key)
     expect(s.activeId).toBe('c/b')
     expect(isDirty(s.tabs[0])).toBe(false)
   })

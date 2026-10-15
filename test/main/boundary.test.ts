@@ -1,6 +1,7 @@
 import { mkdtemp, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { describe, expect, it, vi } from 'vitest'
 
 vi.mock('electron', () => ({ BrowserWindow: class {} }))
@@ -11,10 +12,10 @@ const { AppSettings } = await import('../../src/main/settings')
 describe('isTrustedUrl', () => {
   const file = join('/app', 'out', 'renderer', 'index.html')
   it('accepts only our bundled page in production', () => {
-    const own = new URL(`file://${file}`).href
+    const own = pathToFileURL(file).href
     expect(isTrustedUrl(own, { file })).toBe(true)
     expect(isTrustedUrl(own + '#/x', { file })).toBe(true)
-    expect(isTrustedUrl('file:///etc/passwd', { file })).toBe(false)
+    expect(isTrustedUrl(pathToFileURL(join('/app', 'other.html')).href, { file })).toBe(false)
     expect(isTrustedUrl('https://evil.test/', { file })).toBe(false)
     expect(isTrustedUrl('not a url', { file })).toBe(false)
   })

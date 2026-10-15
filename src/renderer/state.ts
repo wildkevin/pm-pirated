@@ -4,6 +4,8 @@ import type { PmItem, WorkspaceInfo } from '../shared/format/types'
 
 export interface Tab {
   id: string
+  /** Stable React key; unlike `id` it survives renames. */
+  key: string
   item: PmItem
   /** Serialized item as last saved; the tab is dirty when the current item differs. */
   saved: string
@@ -16,9 +18,10 @@ export interface State {
   tabs: Tab[]
   activeId: string | null
   error: string | null
+  nextKey: number
 }
 
-export const initialState: State = { workspace: null, tabs: [], activeId: null, error: null }
+export const initialState: State = { workspace: null, tabs: [], activeId: null, error: null, nextKey: 1 }
 
 export type Action =
   | { type: 'workspace'; workspace: WorkspaceInfo | null }
@@ -54,10 +57,15 @@ export function reducer(s: State, a: Action): State {
     case 'workspace':
       return a.workspace && a.workspace.root === s.workspace?.root
         ? { ...s, workspace: a.workspace }
-        : { ...initialState, workspace: a.workspace }
+        : { ...initialState, workspace: a.workspace, nextKey: s.nextKey }
     case 'open':
       if (s.tabs.some((t) => t.id === a.id)) return { ...s, activeId: a.id }
-      return { ...s, tabs: [...s.tabs, { id: a.id, item: a.item, saved: stableStringify(a.item) }], activeId: a.id }
+      return {
+        ...s,
+        tabs: [...s.tabs, { id: a.id, key: `tab-${s.nextKey}`, item: a.item, saved: stableStringify(a.item) }],
+        activeId: a.id,
+        nextKey: s.nextKey + 1,
+      }
     case 'activate':
       return { ...s, activeId: a.id }
     case 'close':

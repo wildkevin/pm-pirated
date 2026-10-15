@@ -14,7 +14,7 @@ export function TabsBar({ tabs, activeId, onActivate, onClose }: Props) {
     <div className="tabs" role="tablist">
       {tabs.map((tab) => (
         <div
-          key={tab.id}
+          key={tab.key}
           role="tab"
           aria-selected={tab.id === activeId}
           className={`tab${tab.id === activeId ? ' active' : ''}`}

@@ -159,7 +159,7 @@ export function App() {
                   onClose={close}
                 />
                 {active ? (
-                  <Allotment vertical key={active.id}>
+                  <Allotment vertical key={active.key}>
                     <Allotment.Pane minSize={160}>
                       <RequestEditor
                         tab={active}
