@@ -1,4 +1,4 @@
-import type { EngineMethod, EngineMethods, FromEngine, ProxyJson, ToEngine } from '../shared/engine'
+import type { EngineMethod, EngineMethods, FromEngine, ProxyJson, RunnerItemResult, ToEngine } from '../shared/engine'
 
 export interface EngineProcess {
   postMessage(msg: ToEngine): void
@@ -24,6 +24,9 @@ export class EngineClient {
     private onCrash: (code: number) => void = () => undefined,
   ) {}
 
+  /** Receives streamed collection-run results. */
+  onRunItem: (runId: string, item: RunnerItemResult) => void = () => undefined
+
   call<M extends EngineMethod>(method: M, params: EngineMethods[M]['params']): Promise<EngineMethods[M]['result']> {
     return new Promise((resolve, reject) => {
       const id = `c${++this.seq}`
@@ -42,6 +45,7 @@ export class EngineClient {
     if (this.proc) return this.proc
     const p = this.spawn()
     p.onMessage((m) => {
+      if (m.type === 'runItem') return this.onRunItem(m.runId, m.item)
       if (m.type === 'proxy') {
         void this.resolveProxy(m.url)
           .catch(() => null)

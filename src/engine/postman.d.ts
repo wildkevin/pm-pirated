@@ -28,11 +28,22 @@ declare module 'postman-collection' {
   export class CertificateList {
     constructor(parent: unknown, list: unknown[])
   }
+  export class Request {
+    constructor(definition: unknown)
+  }
   export class Url {
     constructor(definition: unknown)
     toString(): string
     static parse(raw: string): Record<string, unknown>
   }
+}
+
+declare module 'postman-code-generators' {
+  const codegen: {
+    getLanguageList(): { key: string; label: string; syntax_mode: string; variants: { key: string }[] }[]
+    convert(language: string, variant: string, request: unknown, options: Record<string, unknown>, cb: (err: Error | null, snippet: string) => void): void
+  }
+  export default codegen
 }
 
 declare module 'curl-to-postmanv2' {

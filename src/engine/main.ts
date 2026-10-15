@@ -2,9 +2,11 @@
 import type {} from 'electron'
 import type { EngineMethods, FromEngine, ProxyJson, ToEngine } from '../shared/engine'
 import { deleteCookies, listCookies, setCookie } from './cookies'
+import { startRunner, type RunnerHandle } from './runner'
 import { startSend, type SendHandle } from './send'
 
 const inflight = new Map<string, SendHandle>()
+const runs = new Map<string, RunnerHandle>()
 const proxyWaiters = new Map<string, (p: ProxyJson | null) => void>()
 let proxySeq = 0
 
@@ -37,6 +39,18 @@ const handlers: Handlers = {
   'cookies.list': ({ cookieFile }) => listCookies(cookieFile),
   'cookies.delete': ({ cookieFile, domain, path, key }) => deleteCookies(cookieFile, domain, path, key),
   'cookies.set': ({ cookieFile, url, cookie }) => setCookie(cookieFile, url, cookie),
+  async run({ runId, spec }) {
+    const handle = startRunner(spec, (item) => post({ type: 'runItem', runId, item }), { resolveSystemProxy })
+    runs.set(runId, handle)
+    try {
+      return await handle.result
+    } finally {
+      runs.delete(runId)
+    }
+  },
+  runStop({ runId }) {
+    runs.get(runId)?.stop()
+  },
 }
 
 process.parentPort.on('message', ({ data }: { data: ToEngine }) => {

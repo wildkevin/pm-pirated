@@ -19,6 +19,7 @@ export interface SidebarActions {
   startRename(id: string | null): void
   remove(id: string, name: string): void
   exportCollection(id: string): void
+  runCollection(id: string): void
   // environments
   openVariables(scope: string, title: string): void
   createEnvironment(): void
@@ -180,6 +181,7 @@ function CollectionsPanel({ workspace, activeId, renamingId, actions }: Props) {
                   { label: 'Add request', onClick: () => actions.createRequest(n.id) },
                   { label: 'Add folder', onClick: () => actions.createFolder(n.id) },
                   { label: 'Edit', onClick: () => actions.openContainer(n.id) },
+                  { label: 'Run', onClick: () => actions.runCollection(n.id) },
                 ]
               : []),
             ...(n.kind === 'collection' ? [{ label: 'Export', onClick: () => actions.exportCollection(n.id) }] : []),

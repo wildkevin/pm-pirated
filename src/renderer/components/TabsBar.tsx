@@ -1,4 +1,4 @@
-import { Eye, Folder, Globe, Layers, Plus, X } from 'lucide-react'
+import { Eye, Folder, Globe, Layers, PlayCircle, Plus, X } from 'lucide-react'
 import { useState } from 'react'
 import type { EnvironmentInfo } from '../../shared/format/types'
 import type { ResolvedVariable } from '../../shared/ipc'
@@ -24,6 +24,7 @@ function TabIcon({ tab }: { tab: Tab }) {
     return <span className={methodClass(m)}>{methodLabel(m)}</span>
   }
   if (tab.doc.kind === 'variables') return <Globe size={12} className="tab-icon" />
+  if (tab.doc.kind === 'runner') return <PlayCircle size={12} className="tab-icon" />
   return tab.id?.split('/').length === 2 ? <Layers size={12} className="tab-icon" /> : <Folder size={12} className="tab-icon" />
 }
 

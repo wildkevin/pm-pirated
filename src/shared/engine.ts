@@ -111,6 +111,59 @@ export interface SendOutcome {
   variables: { environment?: PmVariable[]; globals: PmVariable[]; collection: PmVariable[] }
 }
 
+// --- Collection Runner ---
+
+export interface RunnerSpec {
+  /** v2.1 collection JSON (pruned to the selected requests); request `id`s are workspace node ids. */
+  collection: Record<string, unknown>
+  environment?: { name: string; values: PmVariable[] }
+  globals: PmVariable[]
+  /** One entry per iteration (CSV/JSON data file rows); empty = no data. */
+  data: Record<string, unknown>[]
+  iterationCount: number
+  delayMs: number
+  stopOnError: boolean
+  /** Keep response bodies in the results (memory!). */
+  persistResponses: boolean
+  cookieFile: string
+  workingDir: string
+  options: EngineOptions
+}
+
+export interface RunnerItemResult {
+  iteration: number
+  requestId: string
+  name: string
+  method: string
+  url: string
+  code?: number
+  status?: string
+  timeMs?: number
+  size?: number
+  error?: string
+  tests: TestResult[]
+  scriptErrors: string[]
+  logs: LogEntry[]
+  sent?: SentRequest
+  response?: { headers: { key: string; value: string }[]; body: string }
+}
+
+export interface RunnerSummary {
+  iterations: number
+  durationMs: number
+  requests: number
+  testsPassed: number
+  testsFailed: number
+  errors: number
+  avgResponseMs: number
+  stopped: boolean
+}
+
+export interface RunnerOutcome {
+  summary: RunnerSummary
+  variables: { environment?: PmVariable[]; globals: PmVariable[]; collection: PmVariable[] }
+}
+
 /** JSON form of a postman-collection ProxyConfig. */
 export interface ProxyJson {
   host: string
@@ -128,6 +181,8 @@ export type EngineMethods = {
   'cookies.list': { params: { cookieFile: string }; result: CookieInfo[] }
   'cookies.delete': { params: { cookieFile: string; domain: string; path?: string; key?: string }; result: void }
   'cookies.set': { params: { cookieFile: string; url: string; cookie: string }; result: void }
+  run: { params: { runId: string; spec: RunnerSpec }; result: RunnerOutcome }
+  runStop: { params: { runId: string }; result: void }
 }
 export type EngineMethod = keyof EngineMethods
 
@@ -138,3 +193,5 @@ export type ToEngine =
 export type FromEngine =
   | { type: 'reply'; id: string; result?: unknown; error?: string }
   | { type: 'proxy'; id: string; url: string }
+  /** Streamed while a collection run is in progress. */
+  | { type: 'runItem'; runId: string; item: RunnerItemResult }

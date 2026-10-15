@@ -1,4 +1,4 @@
-import { Save } from 'lucide-react'
+import { Play, Save } from 'lucide-react'
 import { useState } from 'react'
 import type { PmAuth, PmContainer } from '../../shared/format/types'
 import type { VariableRow } from '../../shared/ipc'
@@ -16,11 +16,12 @@ interface Props {
   onPatch(patch: Partial<PmContainer>): void
   onVariables(rows: VariableRow[]): void
   onSave(): void
+  onRun(): void
   onGetOAuth2Token(auth: PmAuth): Promise<void>
 }
 
 /** Collection / folder tab: Overview, Authorization, Pre-request Script, Tests, Variables (collections). */
-export function ContainerEditor({ doc, isCollection, onPatch, onVariables, onSave, onGetOAuth2Token }: Props) {
+export function ContainerEditor({ doc, isCollection, onPatch, onVariables, onSave, onRun, onGetOAuth2Token }: Props) {
   const [section, setSection] = useState<Section>('overview')
   const c = doc.container
   const set = onPatch
@@ -35,9 +36,14 @@ export function ContainerEditor({ doc, isCollection, onPatch, onVariables, onSav
     <div className="editor container-editor">
       <div className="editor-title">
         <span className="editor-name">{c.name}</span>
-        <button className="btn btn-ghost" onClick={onSave} title="Save (Ctrl+S)">
-          <Save size={14} /> Save
-        </button>
+        <span className="editor-actions">
+          <button className="btn btn-ghost" onClick={onRun}>
+            <Play size={14} /> Run
+          </button>
+          <button className="btn btn-ghost" onClick={onSave} title="Save (Ctrl+S)">
+            <Save size={14} /> Save
+          </button>
+        </span>
       </div>
       <div className="subtabs" role="tablist">
         {sections.map((s) => (

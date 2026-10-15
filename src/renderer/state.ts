@@ -9,6 +9,8 @@ export type TabDoc =
   | { kind: 'container'; container: PmContainer; variables: VariableRow[] | null }
   /** Environment or globals editor. */
   | { kind: 'variables'; title: string; rows: VariableRow[] }
+  /** Collection Runner (single tab, id 'runner'). */
+  | { kind: 'runner'; target: string }
 
 export interface Tab {
   /** Stable identity of the tab. Tab-level actions use it because `id` changes on rename. */
@@ -61,6 +63,8 @@ export type Action =
   | { type: 'setRows'; key: string; rows: VariableRow[] }
   /** Replace a doc with freshly loaded data (not for user edits). */
   | { type: 'setDoc'; key: string; doc: TabDoc }
+  /** Opens the Runner tab (or retargets it). */
+  | { type: 'openRunner'; target: string }
   /** After saving; `id` is set when a draft was saved into a collection. */
   | { type: 'saved'; key: string; doc: TabDoc; id?: string }
   | { type: 'sendStart'; key: string; sendId: string }
@@ -70,7 +74,7 @@ export type Action =
 export const isDirty = (t: Tab) => stableStringify(t.doc) !== t.saved
 export const activeTab = (s: State) => s.tabs.find((t) => t.key === s.activeKey)
 export const tabTitle = (t: Tab) =>
-  t.doc.kind === 'request' ? t.doc.item.name : t.doc.kind === 'container' ? t.doc.container.name : t.doc.title
+  t.doc.kind === 'request' ? t.doc.item.name : t.doc.kind === 'container' ? t.doc.container.name : t.doc.kind === 'variables' ? t.doc.title : 'Runner'
 
 const mapTab = (s: State, match: (t: Tab) => boolean, f: (t: Tab) => Tab): State => ({
   ...s,
@@ -97,7 +101,8 @@ function addTab(s: State, id: string | null, doc: TabDoc, saved = stableStringif
 function rename(doc: TabDoc, name: string): TabDoc {
   if (doc.kind === 'request') return { ...doc, item: { ...doc.item, name } }
   if (doc.kind === 'container') return { ...doc, container: { ...doc.container, name } }
-  return { ...doc, title: name }
+  if (doc.kind === 'variables') return { ...doc, title: name }
+  return doc
 }
 
 export function reducer(s: State, a: Action): State {
@@ -175,6 +180,12 @@ export function reducer(s: State, a: Action): State {
       return mapTab(s, (t) => t.key === a.key && t.doc.kind === 'variables', (t) => ({ ...t, doc: { ...(t.doc as Extract<TabDoc, { kind: 'variables' }>), rows: a.rows } }))
     case 'setDoc':
       return mapTab(s, (t) => t.key === a.key, (t) => ({ ...t, doc: a.doc }))
+    case 'openRunner': {
+      const doc: TabDoc = { kind: 'runner', target: a.target }
+      const existing = s.tabs.find((t) => t.doc.kind === 'runner')
+      if (!existing) return addTab(s, 'runner', doc)
+      return { ...mapTab(s, (t) => t.key === existing.key, (t) => ({ ...t, doc, saved: stableStringify(doc) })), activeKey: existing.key }
+    }
     case 'saved':
       return mapTab(
         s,

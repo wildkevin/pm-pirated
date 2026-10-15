@@ -36,7 +36,7 @@ export function ensureProtocol(url: string): string {
 }
 
 /** Our stored URL (string or {raw, query, variable}) → what postman-collection expects. */
-function toRuntimeUrl(url: PmUrl): unknown {
+export function toRuntimeUrl(url: PmUrl): unknown {
   const raw = ensureProtocol(rawUrl(url))
   if (typeof url === 'string') return raw
   return {
@@ -59,13 +59,13 @@ export function buildCollection(item: PmItem, parents: PmContainer[]): Record<st
   return { info: { name: root.name }, auth: root.auth, event: root.event, variable: root.variable ?? [], item: [node] }
 }
 
-const toVars = (scope: { values: { toJSON(): { key: string; value: unknown; type?: string; disabled?: boolean }[] } }) =>
+export const toVars = (scope: { values: { toJSON(): { key: string; value: unknown; type?: string; disabled?: boolean }[] } }) =>
   scope.values.toJSON().map(
     // Types are not echoed back: main re-applies them (e.g. 'secret') from the workspace files.
     (v): PmVariable => ({ key: v.key, value: v.value == null ? '' : String(v.value), ...(v.disabled ? { disabled: true } : {}) }),
   )
 
-function formatArg(a: unknown): string {
+export function formatArg(a: unknown): string {
   return typeof a === 'string' ? a : inspect(a, { depth: 6, breakLength: 120 })
 }
 
@@ -145,7 +145,7 @@ function certificateList(o: EngineOptions, privateName: (real: string) => string
   )
 }
 
-function toResult(res: any): SendResult {
+export function toResult(res: any): SendResult {
   const body: Buffer = res.stream ?? Buffer.alloc(0)
   return {
     ok: true,
@@ -158,7 +158,7 @@ function toResult(res: any): SendResult {
   }
 }
 
-function toSent(request: any): SentRequest {
+export function toSent(request: any): SentRequest {
   const body = request.body
   let text: string | undefined
   if (body && !body.isEmpty?.()) {
@@ -177,6 +177,56 @@ function toSent(request: any): SentRequest {
     headers: request.headers.all().map((h: any) => ({ key: h.key, value: String(h.value) })),
     ...(text !== undefined ? { body: text } : {}),
   }
+}
+
+
+/** What a single send and a collection run share: scopes, network, files and cookies. */
+export interface RunContext {
+  cookieFile: string
+  workingDir: string
+  options: EngineOptions
+}
+
+export function runtimeOptions(
+  ctx: RunContext,
+  scopes: { environment?: unknown; globals: unknown },
+  deps: SendDeps,
+): Record<string, unknown> {
+  const o = ctx.options
+  const privateFiles = new Map<string, string>()
+  const privatePrefix = `pmlocal-private-${randomUUID()}`
+  const privateName = (real: string) => {
+    const name = `${privatePrefix}/${privateFiles.size}`
+    privateFiles.set(name, real)
+    return name
+  }
+  const runOptions: Record<string, unknown> = {
+    environment: scopes.environment,
+    globals: scopes.globals,
+    timeout: { request: o.timeoutMs },
+    fileResolver: fileResolver(ctx.workingDir, o.allowFilesOutsideWorkingDir, privateFiles),
+    ignoreProxyEnvironmentVariables: !o.respectProxyEnv,
+    proxies: proxyList(o),
+    certificates: certificateList(o, privateName),
+    requester: {
+      cookieJar: jarFor(ctx.cookieFile),
+      strictSSL: o.strictSSL,
+      followRedirects: o.followRedirects,
+      implicitTraceHeader: o.sendPostmanToken,
+      ...(o.maxResponseSizeMb > 0 ? { maxResponseSize: o.maxResponseSizeMb * 1024 * 1024 } : {}),
+      ...(o.extraCaFile ? { extendedRootCA: privateName(o.extraCaFile) } : {}),
+    },
+  }
+  if (o.useSystemProxy && deps.resolveSystemProxy) {
+    const ask = deps.resolveSystemProxy
+    runOptions.systemProxy = (url: unknown, cb: (err: Error | null, proxy?: unknown) => void) => {
+      ask(String(url)).then(
+        (p) => cb(null, p ? new ProxyConfig({ match: '<all_urls>', ...p }) : undefined),
+        () => cb(null, undefined),
+      )
+    }
+  }
+  return runOptions
 }
 
 export function startSend(spec: SendSpec, deps: SendDeps = {}): SendHandle {
@@ -205,41 +255,8 @@ export function startSend(spec: SendSpec, deps: SendDeps = {}): SendHandle {
     return { result, cancel: () => undefined }
   }
 
-  const o = spec.options
   const collection = new Collection(buildCollection(spec.item, spec.parents))
-  const privateFiles = new Map<string, string>()
-  const privatePrefix = `pmlocal-private-${randomUUID()}`
-  const privateName = (real: string) => {
-    const name = `${privatePrefix}/${privateFiles.size}`
-    privateFiles.set(name, real)
-    return name
-  }
-  const runOptions: Record<string, unknown> = {
-    environment,
-    globals,
-    timeout: { request: o.timeoutMs },
-    fileResolver: fileResolver(spec.workingDir, o.allowFilesOutsideWorkingDir, privateFiles),
-    ignoreProxyEnvironmentVariables: !o.respectProxyEnv,
-    proxies: proxyList(o),
-    certificates: certificateList(o, privateName),
-    requester: {
-      cookieJar: jarFor(spec.cookieFile),
-      strictSSL: o.strictSSL,
-      followRedirects: o.followRedirects,
-      implicitTraceHeader: o.sendPostmanToken,
-      ...(o.maxResponseSizeMb > 0 ? { maxResponseSize: o.maxResponseSizeMb * 1024 * 1024 } : {}),
-      ...(o.extraCaFile ? { extendedRootCA: privateName(o.extraCaFile) } : {}),
-    },
-  }
-  if (o.useSystemProxy && deps.resolveSystemProxy) {
-    const ask = deps.resolveSystemProxy
-    runOptions.systemProxy = (url: unknown, cb: (err: Error | null, proxy?: unknown) => void) => {
-      ask(String(url)).then(
-        (p) => cb(null, p ? new ProxyConfig({ match: '<all_urls>', ...p }) : undefined),
-        () => cb(null, undefined),
-      )
-    }
-  }
+  const runOptions = runtimeOptions(spec, { environment, globals }, deps)
 
   const scriptResult = (results: any[] | undefined) => {
     for (const r of results ?? []) {

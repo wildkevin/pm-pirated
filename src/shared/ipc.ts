@@ -1,5 +1,5 @@
 // The only surface the renderer can reach (exposed as window.api by the preload).
-import type { CookieInfo, RunReport } from './engine'
+import type { CookieInfo, RunReport, RunnerItemResult, RunnerSummary } from './engine'
 import type { PmContainer, PmItem, WorkspaceInfo } from './format/types'
 import type { AppSettingsData } from './settings'
 
@@ -145,6 +145,20 @@ export interface Api {
   saveSettings(settings: AppSettingsData): Promise<void>
   /** Runs the OAuth 2.0 flow (login window for code/implicit grants) and returns the token. */
   getOAuth2Token(config: OAuth2Config): Promise<OAuth2Token>
+  // collection runner
+  /** Starts a run in the background; results arrive through onRunnerEvent. */
+  startRun(config: RunConfig): Promise<string>
+  stopRun(runId: string): Promise<void>
+  previewDataFile(path: string): Promise<DataPreview>
+  listRuns(): Promise<RunInfo[]>
+  readRun(id: string): Promise<RunRecord>
+  deleteRun(id: string): Promise<void>
+  exportRun(id: string): Promise<boolean>
+
+  // code snippets
+  codeLanguages(): Promise<CodeLanguage[]>
+  generateCode(requestId: string | null, item: PmItem, environmentId: string | null, language: string, variant: string): Promise<string>
+
   /** Save dialog for a response body; false when cancelled. */
   saveResponseBody(defaultName: string, body: Uint8Array): Promise<boolean>
   /** File picker for bodies/certificates; paths inside the workspace come back relative. */
@@ -155,8 +169,10 @@ export interface Api {
 export interface AppEvents {
   onBeforeClose(cb: () => void): void
   closeReady(): void
+  onRunnerEvent(cb: (e: RunnerEvent) => void): void
 }
 export const BEFORE_CLOSE = 'app:before-close'
+export const RUNNER_EVENT = 'runner:event'
 export const CLOSE_READY = 'app:close-ready'
 
 export const CHANNELS = {
@@ -196,4 +212,62 @@ export const CHANNELS = {
   pickFile: 'dialog:pickFile',
   saveResponseBody: 'dialog:saveResponse',
   getOAuth2Token: 'oauth2:getToken',
+  startRun: 'runner:start',
+  stopRun: 'runner:stop',
+  previewDataFile: 'runner:previewData',
+  listRuns: 'runner:list',
+  readRun: 'runner:read',
+  deleteRun: 'runner:delete',
+  exportRun: 'runner:export',
+  codeLanguages: 'code:languages',
+  generateCode: 'code:generate',
 } as const satisfies Record<keyof Api, string>
+
+// --- Collection Runner ---
+
+export interface RunConfig {
+  /** Collection or folder id. */
+  target: string
+  /** Selected requests, in tree order. */
+  requestIds: string[]
+  environmentId: string | null
+  iterations: number
+  delayMs: number
+  dataFile: string | null
+  persistResponses: boolean
+  keepVariables: boolean
+  stopOnError: boolean
+}
+
+export interface RunInfo {
+  id: string
+  name: string
+  startedAt: number
+  summary: RunnerSummary | null
+}
+
+export interface RunRecord extends RunInfo {
+  target: string
+  environment: string | null
+  config: RunConfig
+  results: RunnerItemResult[]
+  error?: string
+}
+
+export type RunnerEvent =
+  | { runId: string; item: RunnerItemResult }
+  | { runId: string; done: RunnerSummary }
+  | { runId: string; error: string }
+
+export interface DataPreview {
+  rows: Record<string, unknown>[]
+  count: number
+  columns: string[]
+}
+
+export interface CodeLanguage {
+  key: string
+  label: string
+  variants: string[]
+  syntax: string
+}

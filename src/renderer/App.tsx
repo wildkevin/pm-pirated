@@ -1,5 +1,5 @@
 import { Allotment } from 'allotment'
-import { FolderOpen, Settings as SettingsIcon, Terminal } from 'lucide-react'
+import { Code2, FolderOpen, PlayCircle, Settings as SettingsIcon, Terminal } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import type { RunReport } from '../shared/engine'
 import type { PmAuth, PmItem, TreeNode } from '../shared/format/types'
@@ -9,11 +9,13 @@ import type { AppSettingsData } from '../shared/settings'
 import { getAttr, setAttr } from './lib/auth'
 import { cleanError, viewBody } from './lib/body'
 import { splitVariables } from './lib/misc'
+import { CodePanel } from './components/CodePanel'
 import { ContainerEditor } from './components/ContainerEditor'
 import { Console, type ConsoleEntry } from './components/Console'
 import { CookiesModal, ImportModal, SaveRequestModal, SettingsModal } from './components/modals'
 import { RequestEditor } from './components/request/RequestEditor'
 import { ResponseViewer } from './components/response/ResponseViewer'
+import { RunnerView } from './components/RunnerView'
 import { Sidebar, type Panel, type SidebarActions } from './components/Sidebar'
 import { TabsBar } from './components/TabsBar'
 import { VariablesEditor } from './components/VariablesEditor'
@@ -50,6 +52,7 @@ export function App() {
   const [consoleOpen, setConsoleOpen] = useState(false)
   const [consoleEntries, setConsoleEntries] = useState<ConsoleEntry[]>([])
   const [modal, setModal] = useState<ModalState>(null)
+  const [codeOpen, setCodeOpen] = useState(false)
   const restoredRoot = useRef<string | null>(null)
 
   const fail = useCallback((e: unknown) => dispatch({ type: 'error', error: cleanError(e) }), [])
@@ -158,7 +161,7 @@ export function App() {
         }
         dispatch({ type: 'saved', key: tab.key, doc })
         dispatch({ type: 'workspace', workspace })
-      } else {
+      } else if (doc.kind === 'variables') {
         await window.api.saveVariables(tab.id!, doc.rows)
         dispatch({ type: 'saved', key: tab.key, doc })
       }
@@ -292,6 +295,7 @@ export function App() {
         dispatch({ type: 'workspace', workspace })
       }),
     exportCollection: (id) => void run(() => window.api.exportCollection(id)),
+    runCollection: (id) => dispatch({ type: 'openRunner', target: id }),
     openVariables: (scope, title) => void openVariables(scope, title),
     createEnvironment: () =>
       void run(async () => {
@@ -378,9 +382,22 @@ export function App() {
       )
     }
     const doc = active.doc
+    if (doc.kind === 'runner') {
+      return (
+        <RunnerView
+          workspace={state.workspace!}
+          target={doc.target}
+          onTarget={(target) => dispatch({ type: 'openRunner', target })}
+          activeEnvironment={state.activeEnvironment}
+          onError={fail}
+        />
+      )
+    }
     if (doc.kind === 'request') {
       const path = active.id ? findPath(state.workspace!.collections, active.id) : []
       return (
+        <div className="request-area">
+        <div className="request-main">
         <Allotment vertical key={active.key}>
           <Allotment.Pane minSize={180} preferredSize="55%">
             <RequestEditor
@@ -413,6 +430,14 @@ export function App() {
             />
           </Allotment.Pane>
         </Allotment>
+        </div>
+        {codeOpen && <CodePanel requestId={active.id} item={doc.item} environmentId={state.activeEnvironment} onClose={() => setCodeOpen(false)} />}
+        <div className="context-bar">
+          <button className={`btn-icon context-btn${codeOpen ? ' active' : ''}`} aria-label="Code" title="Code snippet" onClick={() => setCodeOpen(!codeOpen)}>
+            <Code2 size={18} />
+          </button>
+        </div>
+        </div>
       )
     }
     if (doc.kind === 'container') {
@@ -424,6 +449,7 @@ export function App() {
           onPatch={(patch) => dispatch({ type: 'patchContainer', key: active.key, patch })}
           onVariables={(variables) => dispatch({ type: 'setContainerVariables', key: active.key, variables })}
           onSave={() => void save(active)}
+          onRun={() => dispatch({ type: 'openRunner', target: active.id! })}
           onGetOAuth2Token={getOAuth2Token((auth) => dispatch({ type: 'patchContainer', key: active.key, patch: { auth } }))}
         />
       )
@@ -520,6 +546,13 @@ export function App() {
       <footer className="status-bar">
         <button className={`status-btn${consoleOpen ? ' active' : ''}`} onClick={() => setConsoleOpen(!consoleOpen)} disabled={!state.workspace}>
           <Terminal size={12} /> Console
+        </button>
+        <button
+          className="status-btn"
+          disabled={!state.workspace?.collections.length}
+          onClick={() => state.workspace?.collections[0] && dispatch({ type: 'openRunner', target: active?.doc.kind === 'runner' ? active.doc.target : state.workspace.collections[0].id })}
+        >
+          <PlayCircle size={12} /> Runner
         </button>
         <span className="spacer" />
         {state.workspace && <span className="muted">{state.workspace.root}</span>}

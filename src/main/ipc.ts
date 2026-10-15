@@ -1,14 +1,17 @@
 import { BrowserWindow, dialog, ipcMain, net } from 'electron'
 import { randomUUID } from 'node:crypto'
 import { readFile, writeFile } from 'node:fs/promises'
-import { isAbsolute, join, relative } from 'node:path'
-import type { SendSpec } from '../shared/engine'
+import { isAbsolute, join, relative, resolve } from 'node:path'
+import type { RunnerSpec, SendSpec } from '../shared/engine'
+import type { PmAuth } from '../shared/format/types'
 import { sanitizeName } from '../shared/format/names'
 import { stableStringify } from '../shared/format/stableJson'
 import { rawUrl } from '../shared/format/url'
-import { CHANNELS, type Api, type ImportResult, type ResolvedVariable } from '../shared/ipc'
+import { CHANNELS, RUNNER_EVENT, type Api, type ImportResult, type ResolvedVariable, type RunnerEvent, type RunRecord } from '../shared/ipc'
 import type { EngineClient } from './engineClient'
+import { codeLanguages, generateCode } from './codegen'
 import { ARGS } from './ipcSchemas'
+import { buildRunCollection, deleteRun, listRuns, previewData, readDataFile, readRun, saveRun } from './runner'
 import { getToken, parseCallback } from './oauth2'
 import { engineOptions } from './netconfig'
 import type { SecretStore } from './secrets'
@@ -48,6 +51,16 @@ export function registerIpc(deps: IpcDeps): void {
     vars = new Variables(dir, deps.secrets)
   }
   const cookieFile = () => join(ws(), '.pmlocal', 'cookies.json')
+
+  // Collection runs in progress; results stream to the window and are saved when done.
+  const runs = new Map<string, RunRecord>()
+  const sendRunner = (e: RunnerEvent) => {
+    if (!deps.win.isDestroyed()) deps.win.webContents.send(RUNNER_EVENT, e)
+  }
+  deps.engine.onRunItem = (runId, item) => {
+    runs.get(runId)?.results.push(item)
+    sendRunner({ runId, item })
+  }
 
   const handlers: Api = {
     async openWorkspaceDialog() {
@@ -211,6 +224,87 @@ export function registerIpc(deps: IpcDeps): void {
           return { ok: res.ok, status: res.status, text: () => res.text(), contentType: res.headers.get('content-type') ?? '' }
         },
       }),
+    async startRun(config) {
+      const dir = ws()
+      const v = variables()
+      const runId = `${new Date().toISOString().replace(/[:.]/g, '-')}-${randomUUID().slice(0, 8)}`
+      const collection = await buildRunCollection(dir, config.target, config.requestIds)
+      const collectionId = store.collectionOf(config.target)
+      collection.variable = await v.effective(`col:${collectionId}`)
+      const env = config.environmentId ? (await store.openWorkspace(dir)).environments.find((e) => e.id === config.environmentId) : undefined
+      const data = config.dataFile ? await readDataFile(resolve(dir, config.dataFile)) : []
+      const record: RunRecord = {
+        id: runId,
+        name: (await store.readContainer(dir, config.target)).name,
+        target: config.target,
+        startedAt: Date.now(),
+        environment: env?.name ?? null,
+        config,
+        summary: null,
+        results: [],
+      }
+      runs.set(runId, record)
+      const spec: RunnerSpec = {
+        collection,
+        ...(env ? { environment: { name: env.name, values: await v.effective(`env:${env.id}`) } } : {}),
+        globals: await v.effective('globals'),
+        data,
+        iterationCount: config.iterations,
+        delayMs: config.delayMs,
+        stopOnError: config.stopOnError,
+        persistResponses: config.persistResponses,
+        cookieFile: cookieFile(),
+        workingDir: dir,
+        options: engineOptions(deps.settings.get(), await caFile),
+      }
+      void deps.engine.call('run', { runId, spec }).then(
+        async ({ summary, variables: after }) => {
+          record.summary = summary
+          if (config.keepVariables)
+            await Promise.all([
+              env && after.environment ? v.applyChanges(`env:${env.id}`, after.environment) : undefined,
+              v.applyChanges('globals', after.globals),
+              v.applyChanges(`col:${collectionId}`, after.collection),
+            ]).catch((e) => (record.error = `Could not save variable changes: ${(e as Error).message}`))
+          await saveRun(dir, record).catch(() => undefined)
+          runs.delete(runId)
+          sendRunner({ runId, done: summary })
+        },
+        async (e: Error) => {
+          record.error = e.message
+          await saveRun(dir, record).catch(() => undefined)
+          runs.delete(runId)
+          sendRunner({ runId, error: e.message })
+        },
+      )
+      return runId
+    },
+    async stopRun(runId) {
+      await deps.engine.call('runStop', { runId })
+    },
+    // Picked files inside the workspace come back relative to it.
+    previewDataFile: (path) => previewData(resolve(ws(), path)),
+    listRuns: () => listRuns(ws()),
+    readRun: (id) => readRun(ws(), id),
+    deleteRun: (id) => deleteRun(ws(), id),
+    async exportRun(id) {
+      const record = await readRun(ws(), id)
+      return saveJson(deps.win, `${sanitizeName(record.name)}.postman_test_run.json`, record)
+    },
+    codeLanguages: async () => codeLanguages(),
+    async generateCode(requestId, item, environmentId, language, variant) {
+      const dir = ws()
+      const v = variables()
+      let inherited: PmAuth | undefined
+      let vars = await v.effective('globals')
+      if (requestId) {
+        const chain = await store.loadChain(dir, requestId)
+        inherited = [...chain.parents].reverse().find((p) => p.auth)?.auth
+        vars = [...vars, ...(await v.effective(`col:${chain.collectionId}`))]
+      }
+      if (environmentId) vars = [...vars, ...(await v.effective(`env:${environmentId}`))]
+      return generateCode(item, inherited, vars, language, variant)
+    },
     async saveResponseBody(defaultName, body) {
       const res = await dialog.showSaveDialog(deps.win, { title: 'Save response', defaultPath: sanitizeName(defaultName) })
       if (res.canceled || !res.filePath) return false

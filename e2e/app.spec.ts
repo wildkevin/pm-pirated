@@ -217,3 +217,53 @@ test('a failed request shows the reason instead of crashing', async () => {
   await expect(page.getByTestId('response-error')).toContainText('ECONNREFUSED')
   await app.close()
 })
+
+test('collection runner with a CSV data file, and the code snippet panel', async () => {
+  const dir = await temp('pml-ws-')
+  const app = await launch(await temp('pml-ud-'))
+  const page = await app.firstWindow()
+  await stubDialogs(app, dir)
+  await openWorkspace(page)
+  await newCollectionWithRequest(page, 'Suite', 'First')
+  await urlBar(page).fill(`${base}/first?user={{user}}`)
+  await page.getByRole('tab', { name: 'Tests' }).click()
+  await page.getByLabel('Tests script').fill('pm.test("ok", () => pm.response.to.have.status(200))')
+  await page.keyboard.press('ControlOrMeta+s')
+  await page.getByRole('button', { name: 'Actions for Suite' }).click()
+  await page.getByRole('menuitem', { name: 'Add request' }).click()
+  await page.getByLabel('Name').fill('Second')
+  await page.getByLabel('Name').press('Enter')
+  await urlBar(page).fill(`${base}/second`)
+  await page.getByRole('tab', { name: 'Tests' }).click()
+  await page.getByLabel('Tests script').fill('pm.test("fails", () => pm.expect(1).to.eql(2))')
+  await page.keyboard.press('ControlOrMeta+s')
+
+  // Code snippet for the open request.
+  await page.getByRole('button', { name: 'Code', exact: true }).click()
+  await expect(page.getByTestId('code-snippet')).toContainText(`curl --location '${base}/second'`)
+  await page.getByLabel('Snippet language').selectOption({ label: 'Python - Requests' })
+  await expect(page.getByTestId('code-snippet')).toContainText('import requests')
+  await page.getByRole('button', { name: 'Close code snippet' }).click()
+
+  // Data file inside the workspace; the picker is stubbed to return it.
+  const { writeFile } = await import('node:fs/promises')
+  await writeFile(join(dir, 'users.csv'), 'user\nada\nbob\n')
+  await app.evaluate(({ dialog }, f) => {
+    dialog.showOpenDialog = (async () => ({ canceled: false, filePaths: [f] })) as typeof dialog.showOpenDialog
+  }, join(dir, 'users.csv'))
+
+  await page.getByRole('button', { name: 'Actions for Suite' }).click()
+  await page.getByRole('menuitem', { name: 'Run' }).click()
+  await page.getByRole('button', { name: 'Select File' }).click()
+  await expect(page.getByText('2 rows · columns: user')).toBeVisible()
+  await expect(page.getByLabel('Iterations')).toHaveValue('2')
+  await page.getByRole('button', { name: /^Run Suite/ }).click()
+
+  await expect(page.getByTestId('run-row')).toHaveCount(4)
+  await expect(page.getByTestId('run-passed')).toHaveText('2')
+  await expect(page.getByTestId('run-failed')).toHaveText('2')
+  await expect(page.getByTestId('runner-results')).toContainText('/first?user=bob')
+  await expect(page.getByTestId('runner-results')).toContainText('Completed')
+  await expect(page.getByText('Past runs')).toBeVisible()
+  await app.close()
+})

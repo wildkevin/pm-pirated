@@ -199,7 +199,7 @@ export async function curlToItem(text: string): Promise<PmItem> {
 
 // --- export ---
 
-async function exportTree(root: string, dirId: string): Promise<Json[]> {
+async function exportTree(root: string, dirId: string, withIds: boolean): Promise<Json[]> {
   const abs = resolveInside(root, dirId)
   const isCollection = dirId.split('/').length === 2
   const meta = JSON.parse((await readFile(join(abs, isCollection ? 'collection.json' : 'folder.json'), 'utf8').catch(() => '{}')).replace(/^\uFEFF/, ''))
@@ -214,22 +214,25 @@ async function exportTree(root: string, dirId: string): Promise<Json[]> {
     const id = `${dirId}/${e.name}`
     if (e.isDirectory()) {
       const c = await readContainer(root, id)
-      out.push({ name: c.name, ...containerOf(c), item: await exportTree(root, id) })
+      out.push({ ...(withIds ? { id } : {}), name: c.name, ...containerOf(c), item: await exportTree(root, id, withIds) })
     } else {
-      out.push(await readRequest(root, id))
+      out.push({ ...(await readRequest(root, id)), ...(withIds ? { id } : {}) })
     }
   }
   return out
 }
 
-/** A Postman v2.1 collection. Secret variables are exported with empty values. */
-export async function exportCollection(root: string, id: string): Promise<Json> {
+/**
+ * A Postman v2.1 collection. Secret variables are exported with empty values. `withIds` sets each
+ * item's `id` to its workspace node id (for the Collection Runner, never for files you share).
+ */
+export async function exportCollection(root: string, id: string, withIds = false): Promise<Json> {
   const abs = resolveInside(root, id)
   const meta = JSON.parse(await readFile(join(abs, 'collection.json'), 'utf8'))
   const c = await readContainer(root, id)
   return {
     info: { _postman_id: meta.info?._postman_id, name: c.name, schema: COLLECTION_SCHEMA, ...(c.description ? { description: c.description } : {}) },
-    item: await exportTree(root, id),
+    item: await exportTree(root, id, withIds),
     ...(c.auth ? { auth: c.auth } : {}),
     ...(c.event ? { event: c.event } : {}),
     ...(meta.variable?.length ? { variable: meta.variable.map((v: PmVariable) => (v.type === 'secret' ? { ...v, value: '' } : v)) } : {}),
