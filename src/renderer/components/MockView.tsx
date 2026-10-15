@@ -50,6 +50,7 @@ function MockForm({ def, workspace, onChange }: { def: MockDefinition; workspace
       <div className="setting-row">
         <div>
           <div className="setting-label">Start when the workspace opens</div>
+          <div className="muted">Auto-started mocks listen on this computer only; start manually to allow LAN access.</div>
         </div>
         <Toggle label="Auto start" checked={def.autoStart} onChange={(autoStart) => onChange({ ...def, autoStart })} />
       </div>

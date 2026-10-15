@@ -66,6 +66,17 @@ describe('mock server', () => {
     expect(status).toBe(403)
   })
 
+  it('LAN mocks accept IP addresses but not host names', async () => {
+    const http = await import('node:http')
+    mock = await startMockServer({ host: '0.0.0.0', port: 0, delayMs: 0 }, routes, () => undefined)
+    const port = new URL(mock.url).port
+    const get = (host: string) =>
+      new Promise<number>((resolve) => http.get({ host: '127.0.0.1', port, path: '/users/1', headers: { Host: host } }, (r) => resolve(r.statusCode!)))
+    expect(await get(`192.168.1.20:${port}`)).toBe(200)
+    expect(await get(`localhost:${port}`)).toBe(200)
+    expect(await get('attacker.example')).toBe(403)
+  })
+
   it('hot-swaps routes, applies the delay, and reports a busy port', async () => {
     mock = await startMockServer({ host: '127.0.0.1', port: 0, delayMs: 150 }, routes, () => undefined)
     mock.setRoutes([])

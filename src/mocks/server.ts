@@ -18,6 +18,8 @@ const NOT_FOUND = (message: string) =>
   JSON.stringify({ error: { name: 'mockRequestNotFoundError', message: 'Double check your method and the request path and try again.', header: 'No matching requests', details: message } })
 
 const LOCAL_HOSTS = /^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i
+// LAN mocks: IP literals only (DNS rebinding needs a host name), plus localhost.
+const IP_HOSTS = /^(localhost|\d{1,3}(\.\d{1,3}){3}|\[[0-9a-f:.]+\])(:\d+)?$/i
 
 export function startMockServer(
   config: { host: string; port: number; delayMs: number; cors?: boolean },
@@ -28,8 +30,8 @@ export function startMockServer(
   const dynamic = new VariableScope({ values: [] })
 
   const server = http.createServer((req, res) => {
-    // Localhost-only mocks refuse other Host names (DNS rebinding from a web page).
-    if (config.host === '127.0.0.1' && !LOCAL_HOSTS.test(req.headers.host ?? '')) {
+    // Refuse Host names a web page could point at us through DNS rebinding.
+    if (!(config.host === '127.0.0.1' ? LOCAL_HOSTS : IP_HOSTS).test(req.headers.host ?? '')) {
       res.writeHead(403, { 'Content-Type': 'text/plain' })
       return void res.end('Forbidden host')
     }

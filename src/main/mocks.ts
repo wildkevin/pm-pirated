@@ -128,12 +128,13 @@ export class MockManager {
     return (await readDefinitions(root)).map(({ id, def }) => ({ id, def, status: this.status.get(id) ?? { id, running: false } }))
   }
 
-  async start(root: string, id: string): Promise<MockStatus> {
+  /** `localOnly`: ignore the LAN setting (auto-start from workspace files never exposes the network). */
+  async start(root: string, id: string, localOnly = false): Promise<MockStatus> {
     const def = validateDefinition(JSON.parse(await readFile(mockPath(root, id), 'utf8')))
     try {
       const { url } = await this.client.call('start', {
         id,
-        host: def.allowLan ? '0.0.0.0' : '127.0.0.1',
+        host: def.allowLan && !localOnly ? '0.0.0.0' : '127.0.0.1',
         port: def.port,
         delayMs: def.delayMs,
         cors: !!def.cors,
@@ -157,7 +158,7 @@ export class MockManager {
   }
 
   async autoStart(root: string): Promise<void> {
-    for (const { id, def } of await readDefinitions(root)) if (def.autoStart) await this.start(root, id)
+    for (const { id, def } of await readDefinitions(root)) if (def.autoStart) await this.start(root, id, true)
   }
 
   /** Examples changed somewhere in this collection: reload routes of mocks serving it. */
