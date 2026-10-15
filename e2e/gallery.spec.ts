@@ -49,7 +49,7 @@ test('gallery', async () => {
   await page.getByRole('menuitem', { name: 'Environment' }).click()
   await page.getByLabel('Name').fill('Staging'); await page.getByLabel('Name').press('Enter')
   for (const [i, [k, v]] of [['baseUrl', base], ['apiKey', 'sk_test_51Hx'], ['customerId', 'cus_9921']].entries()) {
-    await page.getByLabel('Variable').last().fill(k)
+    await page.getByLabel('Variable', { exact: true }).last().fill(k)
     await page.getByLabel('Initial value').nth(i).fill(v)
   }
   await page.getByLabel('Type').nth(1).selectOption('secret')
@@ -74,11 +74,12 @@ test('gallery', async () => {
     await url(page).fill(u)
     if (n === 'Create order') {
       await page.getByRole('tab', { name: /^Body/ }).first().click()
-      await page.getByLabel('raw', { exact: true }).check()
+      await page.getByLabel('Body type').selectOption('raw')
       await page.getByLabel('Request body').fill('{\n  "customer": "{{customerId}}",\n  "items": [{ "sku": "PLAN-PRO", "qty": 1 }],\n  "currency": "GBP"\n}')
     }
     if (n === 'Get customer') {
-      await page.getByRole('tab', { name: 'Tests' }).click()
+      await page.getByRole('tab', { name: /^Scripts/ }).click()
+  await page.getByRole('tab', { name: /^After response/ }).click()
       await page.getByLabel('Tests script').fill('pm.test("Status code is 200", function () {\n    pm.response.to.have.status(200);\n});\npm.test("Customer is active", function () {\n    pm.expect(pm.response.json().active).to.be.true;\n});\npm.test("Has billing role", function () {\n    pm.expect(pm.response.json().roles).to.include("support");\n});')
     }
     await page.keyboard.press('ControlOrMeta+s')
@@ -100,7 +101,8 @@ test('gallery', async () => {
   await shot('02-request-and-response')
   await page.getByRole('tab', { name: /Test Results/ }).click()
   await shot('04-test-results')
-  await page.getByRole('tab', { name: 'Tests' }).click()
+  await page.getByRole('tab', { name: /^Scripts/ }).click()
+  await page.getByRole('tab', { name: /^After response/ }).click()
   await shot('03-tests-script-with-snippets')
   await page.getByRole('tab', { name: /^Body/ }).first().click()
 
@@ -119,16 +121,16 @@ test('gallery', async () => {
   await shot('09-request-settings')
   await page.getByRole('tab', { name: 'Params' }).click()
 
-  // Quick look
-  await page.getByRole('button', { name: 'Environment quick look' }).click()
-  await shot('10-environment-quick-look')
-  await page.getByRole('button', { name: 'Environment quick look' }).click()
+  // Right panel: variables in this request + all variables
+  await page.getByRole('tab', { name: 'Variables', exact: true }).click()
+  await page.getByRole('button', { name: 'All variables' }).click()
+  await shot('10-variables-panel')
 
   // Code panel
-  await page.getByRole('button', { name: 'Code', exact: true }).click()
+  await page.getByRole('tab', { name: 'Code', exact: true }).click()
   await page.getByTestId('code-snippet').waitFor()
   await shot('11-code-snippet')
-  await page.getByRole('button', { name: 'Close code snippet' }).click()
+  await page.getByRole('tab', { name: 'Variables', exact: true }).click()
 
   // Console
   await page.locator('.status-bar').getByRole('button', { name: 'Console' }).click()
@@ -176,7 +178,8 @@ test('gallery', async () => {
 
   // Mock server (save an example first)
   await page.getByTestId('tree-row').filter({ hasText: 'Get customer' }).click()
-  await page.getByRole('button', { name: 'Save as example' }).click()
+  await page.getByRole('button', { name: 'Response options' }).click()
+  await page.getByRole('menuitem', { name: 'Save as example' }).click()
   await page.keyboard.press('ControlOrMeta+s')
   const mockPort = await freePort()
   await rowActions(page, 'Payments API')

@@ -1,7 +1,6 @@
-import { ChevronDown, Eye, Folder, Gauge, Globe, Layers, PlayCircle, Plus, Radio, Server, X } from 'lucide-react'
+import { ChevronDown, Folder, Gauge, Globe, Layers, PlayCircle, Plus, Radio, Server, SquareFunction, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import type { EnvironmentInfo } from '../../shared/format/types'
-import type { ResolvedVariable } from '../../shared/ipc'
 import { methodClass, methodLabel } from '../lib/methods'
 import { isDirty, tabTitle, type Tab } from '../state'
 import { Menu } from './common/ui'
@@ -18,8 +17,8 @@ interface Props {
   environments: EnvironmentInfo[]
   activeEnvironment: string | null
   onEnvironment(id: string | null): void
-  quickLook: ResolvedVariable[]
-  onEditEnvironment(): void
+  /** Opens the right panel's Variables view. */
+  onShowVariables(): void
 }
 
 function TabIcon({ tab }: { tab: Tab }) {
@@ -36,7 +35,6 @@ function TabIcon({ tab }: { tab: Tab }) {
 }
 
 export function TabsBar(p: Props) {
-  const [look, setLook] = useState(false)
   const [menu, setMenu] = useState<{ x: number; y: number; key: string } | null>(null)
   const [list, setList] = useState<DOMRect | null>(null)
   const strip = useRef<HTMLDivElement>(null)
@@ -120,62 +118,10 @@ export function TabsBar(p: Props) {
             </option>
           ))}
         </select>
-        <button className={`btn-icon${look ? ' active' : ''}`} aria-label="Environment quick look" title="Environment quick look" onClick={() => setLook(!look)}>
-          <Eye size={16} />
+        <button className="btn-icon" aria-label="Variables" title="Variables" onClick={p.onShowVariables}>
+          <SquareFunction size={16} />
         </button>
-        {look && <QuickLook vars={p.quickLook} hasEnv={!!p.activeEnvironment} onEdit={p.onEditEnvironment} onClose={() => setLook(false)} />}
       </div>
-    </div>
-  )
-}
-
-function QuickLook({ vars, hasEnv, onEdit, onClose }: { vars: ResolvedVariable[]; hasEnv: boolean; onEdit(): void; onClose(): void }) {
-  const section = (scope: ResolvedVariable['scope'], title: string) => {
-    const list = vars.filter((v) => v.scope === scope)
-    return (
-      <div className="ql-section">
-        <div className="ql-title">{title}</div>
-        {list.length === 0 ? (
-          <div className="muted ql-empty">{scope === 'environment' && !hasEnv ? 'No active environment' : 'No variables'}</div>
-        ) : (
-          <table className="ql-table">
-            <thead>
-              <tr>
-                <th>Variable</th>
-                <th>Current value</th>
-              </tr>
-            </thead>
-            <tbody>
-              {list.map((v) => (
-                <tr key={v.key}>
-                  <td>{v.key}</td>
-                  <td>{v.secret ? '••••••' : v.value}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
-    )
-  }
-  return (
-    <div className="quick-look" role="dialog" aria-label="Environment quick look">
-      <div className="ql-head">
-        <span />
-        {hasEnv && (
-          <button
-            className="link-btn"
-            onClick={() => {
-              onClose()
-              onEdit()
-            }}
-          >
-            Edit
-          </button>
-        )}
-      </div>
-      {section('environment', 'Environment')}
-      {section('globals', 'Globals')}
     </div>
   )
 }

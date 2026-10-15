@@ -69,6 +69,22 @@ describe('tabs', () => {
     expect(s.favorites).toEqual([])
   })
 
+  it('keeps the last 10 responses per tab for Response › History', () => {
+    let s = withTabs('a')
+    const key = keyOf(s, 'a')
+    const report = (code: number) => ({ response: { ok: false as const, error: String(code) }, tests: [], logs: [], scriptErrors: [], cookies: [] })
+    for (let i = 0; i < 12; i++) {
+      s = reducer(s, { type: 'sendStart', key, sendId: `s${i}` })
+      s = reducer(s, { type: 'sendDone', key, sendId: `s${i}`, report: report(i), ts: i })
+    }
+    expect(s.tabs[0].past).toHaveLength(10)
+    expect(s.tabs[0].past![0].ts).toBe(11)
+    s = reducer(s, { type: 'showReport', key, index: 3 })
+    expect(s.tabs[0].report).toBe(s.tabs[0].past![3].report)
+    s = reducer(s, { type: 'clearReport', key })
+    expect(s.tabs[0].report).toBeUndefined()
+  })
+
   it('tracks dirty state across edits and saves', () => {
     let s = withTabs('a')
     const key = keyOf(s, 'a')

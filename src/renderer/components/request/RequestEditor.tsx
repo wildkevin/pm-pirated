@@ -1,18 +1,18 @@
-import { ChevronDown, Save } from 'lucide-react'
+import { ChevronDown, ChevronRight, FileText, Save } from 'lucide-react'
 import { useState } from 'react'
 import type { PmAuth, PmItem, PmRequest } from '../../../shared/format/types'
 import { pathVariables, queryParams, rawUrl, setPathVariables, setQueryParams, setRaw } from '../../../shared/format/url'
 import type { AppSettingsData } from '../../../shared/settings'
 import { METHODS, methodClass } from '../../lib/methods'
-import type { Tab } from '../../state'
+import { isDirty, type Tab } from '../../state'
 import { KeyValueTable, Menu } from '../common/ui'
 import { VarInput, type Resolve } from '../common/VarInput'
 import { AuthEditor } from './AuthEditor'
 import { BodyEditor } from './BodyEditor'
 import { RequestSettings } from './RequestSettings'
-import { ScriptEditor, scriptOf } from './ScriptEditor'
+import { ScriptsPanel, scriptOf } from './ScriptEditor'
 
-type Section = 'params' | 'auth' | 'headers' | 'body' | 'prerequest' | 'test' | 'settings'
+type Section = 'docs' | 'params' | 'auth' | 'headers' | 'body' | 'scripts' | 'settings'
 
 export interface RequestEditorProps {
   tab: Tab
@@ -25,6 +25,8 @@ export interface RequestEditorProps {
   onSend(download?: boolean): void
   onCancel(): void
   onSave(): void
+  /** Save a copy into a collection (Save As…). */
+  onSaveAs(): void
   onPasteCurl(text: string): void
   onOpenCookies(): void
   pickFile(): Promise<string | null>
@@ -34,6 +36,7 @@ export interface RequestEditorProps {
 export function RequestEditor(p: RequestEditorProps) {
   const [section, setSection] = useState<Section>('params')
   const [sendMenu, setSendMenu] = useState<DOMRect | null>(null)
+  const [saveMenu, setSaveMenu] = useState<DOMRect | null>(null)
   const { item } = p
   const req = item.request
   const raw = rawUrl(req.url)
@@ -43,16 +46,17 @@ export function RequestEditor(p: RequestEditorProps) {
   const activeHeaders = req.header.filter((h) => !h.disabled && h.key).length
   const activeParams = params.filter((x) => !x.disabled && x.key).length
   const hasBody = !!req.body && !(req.body as { disabled?: boolean }).disabled
-  const hasPre = !!scriptOf(item.event, 'prerequest').trim()
-  const hasTest = !!scriptOf(item.event, 'test').trim()
+  const hasScripts = !!scriptOf(item.event, 'prerequest').trim() || !!scriptOf(item.event, 'test').trim()
+  const dirty = isDirty(p.tab) || p.tab.id === null
 
+  // Postman 12: grey count + green dot when a section has content.
   const tabs: { id: Section; label: string; badge?: number; dot?: boolean }[] = [
-    { id: 'params', label: 'Params', badge: activeParams },
+    { id: 'docs', label: 'Docs' },
+    { id: 'params', label: 'Params', badge: activeParams, dot: activeParams > 0 },
     { id: 'auth', label: 'Authorization', dot: !!req.auth && req.auth.type !== 'noauth' },
-    { id: 'headers', label: 'Headers', badge: activeHeaders },
+    { id: 'headers', label: 'Headers', badge: activeHeaders, dot: activeHeaders > 0 },
     { id: 'body', label: 'Body', dot: hasBody },
-    { id: 'prerequest', label: 'Pre-request Script', dot: hasPre },
-    { id: 'test', label: 'Tests', dot: hasTest },
+    { id: 'scripts', label: 'Scripts', dot: hasScripts },
     { id: 'settings', label: 'Settings', dot: !!item.protocolProfileBehavior },
   ]
 
@@ -63,14 +67,21 @@ export function RequestEditor(p: RequestEditorProps) {
           <span className="http-badge">HTTP</span>
           {p.breadcrumb.map((b, i) => (
             <span key={i} className="crumb">
-              {b} <span className="crumb-sep">/</span>
+              {b}
+              <ChevronRight size={12} className="crumb-sep" />
             </span>
           ))}
           <span className="editor-name">{item.name}</span>
         </span>
-        <button className="btn btn-ghost" onClick={p.onSave} title="Save (Ctrl+S)">
-          <Save size={14} /> Save
-        </button>
+        <span className="save-group">
+          <button className={`btn btn-ghost save-main${dirty ? '' : ' clean'}`} onClick={p.onSave} title="Save (Ctrl+S)">
+            <Save size={14} /> Save
+          </button>
+          <button className="btn btn-ghost save-more" aria-label="Save options" onClick={(e) => setSaveMenu(e.currentTarget.getBoundingClientRect())}>
+            <ChevronDown size={14} />
+          </button>
+        </span>
+        {saveMenu && <Menu style={{ left: saveMenu.right - 180, top: saveMenu.bottom + 4 }} onClose={() => setSaveMenu(null)} items={[{ label: 'Save As…', onClick: p.onSaveAs }]} />}
       </div>
 
       <div className="url-row">
@@ -116,18 +127,28 @@ export function RequestEditor(p: RequestEditorProps) {
       <div className="subtabs" role="tablist">
         {tabs.map((t) => (
           <button key={t.id} role="tab" aria-selected={section === t.id} onClick={() => setSection(t.id)}>
+            {t.id === 'docs' && <FileText size={13} />}
             {t.label}
-            {!!t.badge && <span className="count">({t.badge})</span>}
+            {!!t.badge && <span className="count">{t.badge}</span>}
             {t.dot && <span className="dot-indicator" />}
           </button>
         ))}
         <span className="spacer" />
-        <button className="link-btn cookies-link" onClick={p.onOpenCookies}>
+        <button className="subtab-link" onClick={p.onOpenCookies}>
           Cookies
         </button>
       </div>
 
       <div className="subtab-panel">
+        {section === 'docs' && (
+          <textarea
+            aria-label="Request documentation"
+            className="docs-area"
+            placeholder="Document this request..."
+            value={req.description ?? ''}
+            onChange={(e) => p.onPatch({ description: e.target.value || undefined })}
+          />
+        )}
         {section === 'params' && (
           <>
             <div className="section-title">Query Params</div>
@@ -149,11 +170,14 @@ export function RequestEditor(p: RequestEditorProps) {
             onGetOAuth2Token={p.onGetOAuth2Token}
           />
         )}
-        {section === 'headers' && <KeyValueTable rows={req.header} onChange={(header) => p.onPatch({ header })} />}
-        {section === 'body' && <BodyEditor body={req.body} onChange={(body) => p.onPatch({ body })} pickFile={p.pickFile} />}
-        {(section === 'prerequest' || section === 'test') && (
-          <ScriptEditor key={section} events={item.event} listen={section} onChange={(event) => p.onItemPatch({ event })} />
+        {section === 'headers' && (
+          <>
+            <div className="section-title">Headers</div>
+            <KeyValueTable rows={req.header} onChange={(header) => p.onPatch({ header })} />
+          </>
         )}
+        {section === 'body' && <BodyEditor body={req.body} onChange={(body) => p.onPatch({ body })} pickFile={p.pickFile} />}
+        {section === 'scripts' && <ScriptsPanel events={item.event} scope="request" onChange={(event) => p.onItemPatch({ event })} />}
         {section === 'settings' && (
           <RequestSettings behavior={item.protocolProfileBehavior} settings={p.settings} onChange={(protocolProfileBehavior) => p.onItemPatch({ protocolProfileBehavior })} />
         )}

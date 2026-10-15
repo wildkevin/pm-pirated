@@ -1,5 +1,5 @@
 // Small shared UI pieces: modal, toggle, key/value table, dropdown menu.
-import { ChevronRight, Trash2, X } from 'lucide-react'
+import { ChevronRight, X } from 'lucide-react'
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import type { PmFormParam, PmKeyValue } from '../../../shared/format/types'
 import { fromBulk, toBulk } from '../../lib/misc'
@@ -122,10 +122,12 @@ interface KvProps<T extends PmKeyValue> {
   readOnlyKeys?: boolean
   noBulk?: boolean
   noToggle?: boolean
+  /** Postman shows a Description column for params, headers and form fields. */
+  noDescription?: boolean
 }
 
 /** Postman's key/value editor: trailing blank row appends, checkbox disables, Bulk Edit as text. */
-export function KeyValueTable<T extends PmKeyValue>({ rows, onChange, fileColumn, onPickFile, keyLabel = 'Key', readOnlyKeys, noBulk, noToggle }: KvProps<T>) {
+export function KeyValueTable<T extends PmKeyValue>({ rows, onChange, fileColumn, onPickFile, keyLabel = 'Key', readOnlyKeys, noBulk, noToggle, noDescription }: KvProps<T>) {
   const [bulk, setBulk] = useState<string | null>(null)
   const update = (i: number, patch: Partial<T>) => {
     const next = i === rows.length ? [...rows, { key: '', value: '', ...patch } as T] : rows.map((r, j) => (j === i ? { ...r, ...patch } : r))
@@ -141,6 +143,7 @@ export function KeyValueTable<T extends PmKeyValue>({ rows, onChange, fileColumn
           <th>{keyLabel}</th>
           {fileColumn && <th className="kv-type" />}
           <th>Value</th>
+          {!noDescription && <th>Description</th>}
           {!noBulk ? (
             <th className="kv-actions kv-bulk">
               <button className="link-btn" onClick={() => setBulk(bulk === null ? toBulk(rows) : null)}>
@@ -155,7 +158,7 @@ export function KeyValueTable<T extends PmKeyValue>({ rows, onChange, fileColumn
       <tbody>
         {bulk !== null ? (
           <tr>
-            <td colSpan={fileColumn ? 5 : 4} className="kv-bulk-cell">
+            <td colSpan={4 + (fileColumn ? 1 : 0) + (noDescription ? 0 : 1)} className="kv-bulk-cell">
               <textarea
                 aria-label="Bulk edit"
                 className="bulk-area"
@@ -164,7 +167,8 @@ export function KeyValueTable<T extends PmKeyValue>({ rows, onChange, fileColumn
                 placeholder={'Rows are separated by new lines\nKeys and values are separated by :\nPrepend // to any row you want to add but keep disabled'}
                 onChange={(e) => {
                   setBulk(e.target.value)
-                  onChange(fromBulk(e.target.value) as T[])
+                  // Bulk text only carries key:value — keep each row's description / file settings.
+                  onChange(fromBulk(e.target.value).map((r) => ({ ...rows.find((o) => o.key === r.key), ...r, disabled: r.disabled })) as T[])
                 }}
               />
             </td>
@@ -218,10 +222,15 @@ export function KeyValueTable<T extends PmKeyValue>({ rows, onChange, fileColumn
                     <input aria-label="Value" placeholder="Value" value={row.value} spellCheck={false} onChange={(e) => update(i, { value: e.target.value } as Partial<T>)} />
                   )}
                 </td>
+                {!noDescription && (
+                  <td>
+                    <input aria-label="Description" placeholder="Description" value={row.description ?? ''} spellCheck={false} onChange={(e) => update(i, { description: e.target.value || undefined } as Partial<T>)} />
+                  </td>
+                )}
                 <td className="kv-actions">
                   {!blank && !readOnlyKeys && (
-                    <button className="btn-icon" aria-label={`Delete ${row.key || 'row'}`} onClick={() => onChange(rows.filter((_, j) => j !== i))}>
-                      <Trash2 size={13} />
+                    <button className="btn-icon kv-delete" aria-label={`Delete ${row.key || 'row'}`} onClick={() => onChange(rows.filter((_, j) => j !== i))}>
+                      <X size={13} />
                     </button>
                   )}
                 </td>

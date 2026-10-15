@@ -89,7 +89,7 @@ test('build a POST with headers and a JSON body, send, save, and reopen after re
   await page.getByLabel('Key').last().fill('X-Token')
   await page.getByLabel('Value').first().fill('abc')
   await page.getByRole('tab', { name: /^Body/ }).click()
-  await page.getByLabel('raw', { exact: true }).check()
+  await page.getByLabel('Body type').selectOption('raw')
   await page.getByLabel('Request body').fill('{"hello":"world"}')
   await page.getByRole('button', { name: 'Send', exact: true }).click()
 
@@ -127,7 +127,7 @@ test('environment variables, collection auth, scripts, tests and console', async
   await page.getByRole('menuitem', { name: 'Environment' }).click()
   await page.getByLabel('Name').fill('Dev')
   await page.getByLabel('Name').press('Enter')
-  await page.getByLabel('Variable').last().fill('base')
+  await page.getByLabel('Variable', { exact: true }).last().fill('base')
   await page.getByLabel('Initial value').first().fill(base)
   await page.keyboard.press('ControlOrMeta+s')
   await expect(page.getByRole('tab', { name: /^Dev/ })).toBeVisible()
@@ -141,9 +141,11 @@ test('environment variables, collection auth, scripts, tests and console', async
   await expect(page.locator('.cm-var-missing')).toHaveText('{{missing}}')
   await urlBar(page).fill('{{base}}/users')
 
-  await page.getByRole('tab', { name: 'Pre-request Script' }).click()
+  await page.getByRole('tab', { name: /^Scripts/ }).click()
+  await page.getByRole('tab', { name: 'Before request' }).click()
   await page.getByLabel('Pre-request script').fill('pm.environment.set("token", "T-123"); console.log("pre ran")')
-  await page.getByRole('tab', { name: 'Tests' }).click()
+  await page.getByRole('tab', { name: /^Scripts/ }).click()
+  await page.getByRole('tab', { name: /^After response/ }).click()
   await page.getByLabel('Tests script').fill('pm.test("is 200", () => pm.response.to.have.status(200)); pm.test("fails", () => pm.expect(1).to.eql(2))')
   await page.getByRole('tab', { name: 'Authorization' }).click()
   await page.getByLabel('Auth type').selectOption('bearer')
@@ -157,9 +159,8 @@ test('environment variables, collection auth, scripts, tests and console', async
   await expect(page.getByTestId('test-results')).toContainText('expected 1 to deeply equal 2')
 
   // The script's variable change is persisted as the environment's current value.
-  await page.getByRole('button', { name: 'Environment quick look' }).click()
-  await expect(page.getByRole('dialog', { name: 'Environment quick look' })).toContainText('T-123')
-  await page.getByRole('button', { name: 'Environment quick look' }).click()
+  await page.getByRole('tab', { name: 'Variables', exact: true }).click()
+  await expect(page.getByRole('complementary', { name: 'Right panel' })).toContainText('T-123')
 
   await page.locator('.status-bar').getByRole('button', { name: 'Console' }).click()
   await expect(page.getByRole('region', { name: 'Console' })).toContainText('pre ran')
@@ -235,7 +236,8 @@ test('collection runner with a CSV data file, and the code snippet panel', async
   await openWorkspace(page)
   await newCollectionWithRequest(page, 'Suite', 'First')
   await urlBar(page).fill(`${base}/first?user={{user}}`)
-  await page.getByRole('tab', { name: 'Tests' }).click()
+  await page.getByRole('tab', { name: /^Scripts/ }).click()
+  await page.getByRole('tab', { name: /^After response/ }).click()
   await page.getByLabel('Tests script').fill('pm.test("ok", () => pm.response.to.have.status(200))')
   await page.keyboard.press('ControlOrMeta+s')
   await rowActions(page, 'Suite')
@@ -243,16 +245,17 @@ test('collection runner with a CSV data file, and the code snippet panel', async
   await page.getByLabel('Name').fill('Second')
   await page.getByLabel('Name').press('Enter')
   await urlBar(page).fill(`${base}/second`)
-  await page.getByRole('tab', { name: 'Tests' }).click()
+  await page.getByRole('tab', { name: /^Scripts/ }).click()
+  await page.getByRole('tab', { name: /^After response/ }).click()
   await page.getByLabel('Tests script').fill('pm.test("fails", () => pm.expect(1).to.eql(2))')
   await page.keyboard.press('ControlOrMeta+s')
 
   // Code snippet for the open request.
-  await page.getByRole('button', { name: 'Code', exact: true }).click()
+  await page.getByRole('tab', { name: 'Code', exact: true }).click()
   await expect(page.getByTestId('code-snippet')).toContainText(`curl --location '${base}/second'`)
   await page.getByLabel('Snippet language').selectOption({ label: 'Python - Requests' })
   await expect(page.getByTestId('code-snippet')).toContainText('import requests')
-  await page.getByRole('button', { name: 'Close code snippet' }).click()
+  await page.getByRole('tab', { name: 'Variables', exact: true }).click()
 
   // Data file inside the workspace; the picker is stubbed to return it.
   const { writeFile } = await import('node:fs/promises')
@@ -293,7 +296,8 @@ test('mock server answers with a saved example', async () => {
   await urlBar(page).fill(`${base}/products/7`)
   await page.getByRole('button', { name: 'Send', exact: true }).click()
   await expect(page.getByTestId('response-status')).toHaveText('200 OK')
-  await page.getByRole('button', { name: 'Save as example' }).click()
+  await page.getByRole('button', { name: 'Response options' }).click()
+  await page.getByRole('menuitem', { name: 'Save as example' }).click()
   await page.keyboard.press('ControlOrMeta+s')
   await expect(page.getByLabel('Unsaved changes')).toHaveCount(0)
 

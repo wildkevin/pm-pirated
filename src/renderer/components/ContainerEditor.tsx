@@ -4,11 +4,11 @@ import type { PmAuth, PmContainer } from '../../shared/format/types'
 import type { VariableRow } from '../../shared/ipc'
 import type { TabDoc } from '../state'
 import { AuthEditor } from './request/AuthEditor'
-import { ScriptEditor } from './request/ScriptEditor'
+import { ScriptsPanel } from './request/ScriptEditor'
 import { VariablesEditor } from './VariablesEditor'
 
 type Container = Extract<TabDoc, { kind: 'container' }>
-type Section = 'overview' | 'auth' | 'prerequest' | 'test' | 'variables'
+type Section = 'overview' | 'auth' | 'scripts' | 'variables'
 
 interface Props {
   doc: Container
@@ -28,8 +28,7 @@ export function ContainerEditor({ doc, isCollection, onPatch, onVariables, onSav
   const sections: { id: Section; label: string }[] = [
     { id: 'overview', label: 'Overview' },
     { id: 'auth', label: 'Authorization' },
-    { id: 'prerequest', label: 'Pre-request Script' },
-    { id: 'test', label: 'Tests' },
+    { id: 'scripts', label: 'Scripts' },
     ...(isCollection ? [{ id: 'variables' as const, label: 'Variables' }] : []),
   ]
   return (
@@ -54,13 +53,16 @@ export function ContainerEditor({ doc, isCollection, onPatch, onVariables, onSav
       </div>
       <div className="subtab-panel">
         {section === 'overview' && (
-          <textarea
-            aria-label="Description"
-            className="input textarea description"
-            placeholder={`Add a description for this ${isCollection ? 'collection' : 'folder'}`}
-            value={c.description ?? ''}
-            onChange={(e) => set({ description: e.target.value || undefined })}
-          />
+          <div className="overview">
+            <h1 className="overview-title">{c.name}</h1>
+            <textarea
+              aria-label="Description"
+              className="overview-description"
+              placeholder={`Help people understand your ${isCollection ? 'collection' : 'folder'} by adding a description.`}
+              value={c.description ?? ''}
+              onChange={(e) => set({ description: e.target.value || undefined })}
+            />
+          </div>
         )}
         {section === 'auth' && (
           <>
@@ -70,16 +72,7 @@ export function ContainerEditor({ doc, isCollection, onPatch, onVariables, onSav
             <AuthEditor auth={c.auth} canInherit={!isCollection} onChange={(auth) => set({ auth })} onGetOAuth2Token={onGetOAuth2Token} />
           </>
         )}
-        {(section === 'prerequest' || section === 'test') && (
-          <>
-            <p className="muted">
-              {section === 'prerequest'
-                ? `This script will execute before every request in this ${isCollection ? 'collection' : 'folder'}.`
-                : `These tests will execute after every request in this ${isCollection ? 'collection' : 'folder'}.`}
-            </p>
-            <ScriptEditor key={section} events={c.event} listen={section} onChange={(event) => set({ event })} />
-          </>
-        )}
+        {section === 'scripts' && <ScriptsPanel events={c.event} scope={isCollection ? 'collection' : 'folder'} onChange={(event) => set({ event })} />}
         {section === 'variables' && doc.variables && (
           <>
             <p className="muted">These variables are specific to this collection and its requests.</p>

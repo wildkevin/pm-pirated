@@ -1,5 +1,5 @@
 import { Allotment } from 'allotment'
-import { Code2, Cookie, FolderOpen, Globe, PanelLeft, PlayCircle, Radio, Terminal } from 'lucide-react'
+import { Cookie, FolderOpen, Globe, PanelLeft, PanelRight, PlayCircle, Radio, Terminal } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import type { RunReport } from '../shared/engine'
 import type { PmAuth, PmItem, TreeNode } from '../shared/format/types'
@@ -11,7 +11,7 @@ import type { AppSettingsData } from '../shared/settings'
 import { getAttr, setAttr } from './lib/auth'
 import { cleanError, viewBody } from './lib/body'
 import { splitVariables } from './lib/misc'
-import { CodePanel } from './components/CodePanel'
+import { RightPanel, type RightView } from './components/RightPanel'
 import { ContainerEditor } from './components/ContainerEditor'
 import { Console, type ConsoleEntry } from './components/Console'
 import { CookiesModal, ImportModal, SaveRequestModal, SettingsModal } from './components/modals'
@@ -59,7 +59,14 @@ export function App() {
   const [consoleOpen, setConsoleOpen] = useState(false)
   const [consoleEntries, setConsoleEntries] = useState<ConsoleEntry[]>([])
   const [modal, setModal] = useState<ModalState>(null)
-  const [codeOpen, setCodeOpen] = useState(false)
+  // Postman 12's right panel (Variables / Code / Info); open by default, remembered.
+  const [rightOpen, setRightOpen] = useState(() => localStorage.getItem('pm-local.right') !== 'hidden')
+  const [rightView, setRightView] = useState<RightView>('variables')
+  const showRight = (open: boolean, view?: RightView) => {
+    localStorage.setItem('pm-local.right', open ? 'shown' : 'hidden')
+    setRightOpen(open)
+    if (view) setRightView(view)
+  }
   const [searchOpen, setSearchOpen] = useState(false)
   // Back/forward through previously active tabs (Postman's ⌘[ / ⌘]).
   const [nav, setNav] = useState<{ back: string[]; forward: string[] }>({ back: [], forward: [] })
@@ -558,6 +565,7 @@ export function App() {
               onSend={(download) => send(active, download)}
               onCancel={() => cancel(active)}
               onSave={() => void save(active)}
+              onSaveAs={() => setModal({ kind: 'save', key: active.key })}
               onPasteCurl={pasteCurl(active)}
               onOpenCookies={() => setModal({ kind: 'cookies' })}
               pickFile={() => window.api.pickFile('Select file')}
@@ -574,15 +582,12 @@ export function App() {
                 if (res?.ok) void run(() => window.api.saveResponseBody(doc.item.name || 'response', res.body))
               }}
               onSaveExample={() => saveExample(active)}
+              past={active.past ?? []}
+              onShowPast={(index) => dispatch({ type: 'showReport', key: active.key, index })}
+              onClear={() => dispatch({ type: 'clearReport', key: active.key })}
             />
           </Allotment.Pane>
         </Allotment>
-        </div>
-        {codeOpen && <CodePanel requestId={active.id} item={doc.item} environmentId={state.activeEnvironment} onClose={() => setCodeOpen(false)} />}
-        <div className="context-bar">
-          <button className={`btn-icon context-btn${codeOpen ? ' active' : ''}`} aria-label="Code" title="Code snippet" onClick={() => setCodeOpen(!codeOpen)}>
-            <Code2 size={18} />
-          </button>
         </div>
         </div>
       )
@@ -676,14 +681,31 @@ export function App() {
                       environments={state.workspace.environments}
                       activeEnvironment={state.activeEnvironment}
                       onEnvironment={(id) => dispatch({ type: 'environment', id })}
-                      quickLook={resolved}
-                      onEditEnvironment={() => {
-                        const env = state.workspace!.environments.find((e) => e.id === state.activeEnvironment)
-                        if (env) void openVariables(`env:${env.id}`, env.name)
-                      }}
+                      onShowVariables={() => showRight(!(rightOpen && rightView === 'variables'), 'variables')}
                     />
                     <div className="workbench-content">{content()}</div>
                   </div>
+                </Allotment.Pane>
+                <Allotment.Pane preferredSize={300} minSize={220} maxSize={640} visible={rightOpen}>
+                  <RightPanel
+                    view={rightView}
+                    setView={setRightView}
+                    onClose={() => showRight(false)}
+                    active={active}
+                    resolved={resolved}
+                    environmentId={state.activeEnvironment}
+                    environmentName={state.workspace.environments.find((e) => e.id === state.activeEnvironment)?.name ?? null}
+                    onEdit={(scope) => {
+                      const ws = state.workspace!
+                      if (scope === 'globals') return void openVariables('globals', 'Globals')
+                      if (scope === 'environment') {
+                        const env = ws.environments.find((e) => e.id === state.activeEnvironment)
+                        return void (env && openVariables(`env:${env.id}`, env.name))
+                      }
+                      const col = active?.id?.startsWith('collections/') ? active.id.split('/').slice(0, 2).join('/') : null
+                      if (col) void openContainer(col)
+                    }}
+                  />
                 </Allotment.Pane>
               </Allotment>
             </Allotment.Pane>
@@ -734,6 +756,9 @@ export function App() {
         </button>
         <button className="status-btn" disabled={!state.workspace} onClick={() => setModal({ kind: 'cookies' })}>
           <Cookie size={12} /> Cookies
+        </button>
+        <button className={`status-btn${rightOpen ? ' active' : ''}`} aria-label={rightOpen ? 'Hide right panel' : 'Show right panel'} title="Toggle right panel" disabled={!state.workspace} onClick={() => showRight(!rightOpen)}>
+          <PanelRight size={12} />
         </button>
       </footer>
 

@@ -72,25 +72,27 @@ export function BodyEditor({ body, onChange, pickFile }: Props) {
 
   return (
     <div className="body-editor">
-      <div className="body-modes" role="radiogroup" aria-label="Body type">
-        {MODES.map((m) => (
-          <label key={m.mode} className="radio">
-            <input
-              type="radio"
-              name="body-mode"
-              aria-label={m.label}
-              checked={mode === m.mode}
-              onChange={() => {
-                if (m.mode === 'none') onChange(body ? ({ ...body, disabled: true } as unknown as PmBody) : undefined)
-                else {
-                  const { disabled: _d, ...rest } = (body ?? {}) as PmBody & { disabled?: boolean }
-                  onChange(switchMode(body ? (rest as PmBody) : undefined, m.mode))
-                }
-              }}
-            />
-            {m.label}
-          </label>
-        ))}
+      <div className="body-modes">
+        {/* Postman 12: a mode dropdown instead of radio buttons. */}
+        <select
+          aria-label="Body type"
+          className="pill-select"
+          value={mode}
+          onChange={(e) => {
+            const next = e.target.value as BodyMode | 'none'
+            if (next === 'none') onChange(body ? ({ ...body, disabled: true } as unknown as PmBody) : undefined)
+            else {
+              const { disabled: _d, ...rest } = (body ?? {}) as PmBody & { disabled?: boolean }
+              onChange(switchMode(body ? (rest as PmBody) : undefined, next))
+            }
+          }}
+        >
+          {MODES.map((m) => (
+            <option key={m.mode} value={m.mode}>
+              {m.label}
+            </option>
+          ))}
+        </select>
         {body && !disabled && body.mode === 'raw' && (
           <>
             <select

@@ -1,8 +1,9 @@
-import { Copy, Download, Save } from 'lucide-react'
+import { ChevronDown, Copy, History, MoreHorizontal } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import type { RunReport } from '../../../shared/engine'
 import { formatBytes, viewBody } from '../../lib/body'
 import { CodeEditor, type EditorLanguage } from '../common/CodeEditor'
+import { Menu, type MenuItem } from '../common/ui'
 
 type Section = 'body' | 'cookies' | 'headers' | 'tests'
 type BodyMode = 'pretty' | 'raw' | 'preview'
@@ -14,9 +15,51 @@ interface Props {
   onCancel(): void
   onSaveBody(): void
   onSaveExample(): void
+  /** This session's earlier responses (newest first). */
+  past: { ts: number; report: RunReport }[]
+  onShowPast(index: number): void
+  onClear(): void
 }
 
-export function ResponseViewer({ report, sending, onCancel, onSaveBody, onSaveExample }: Props) {
+const pastLabel = (p: { ts: number; report: RunReport }) => {
+  const r = p.report.response
+  const time = new Date(p.ts).toLocaleTimeString()
+  return r.ok ? `${r.code} ${r.status} · ${Math.round(r.timeMs)} ms · ${time}` : `Error · ${time}`
+}
+
+/** "History ▾": earlier responses of this tab, like Postman's response history. */
+function HistoryButton({ past, current, onShow }: { past: Props['past']; current?: RunReport; onShow(i: number): void }) {
+  const [at, setAt] = useState<DOMRect | null>(null)
+  return (
+    <>
+      <button className="btn btn-ghost btn-small response-history" disabled={!past.length} onClick={(e) => setAt(e.currentTarget.getBoundingClientRect())}>
+        <History size={14} /> History <ChevronDown size={12} />
+      </button>
+      {at && (
+        <Menu
+          label="Response history"
+          style={{ left: at.left, top: at.bottom + 4 }}
+          onClose={() => setAt(null)}
+          items={past.map((p, i) => ({ label: pastLabel(p), shortcut: p.report === current ? '✓' : undefined, onClick: () => onShow(i) }))}
+        />
+      )}
+    </>
+  )
+}
+
+function MoreButton({ items }: { items: MenuItem[] }) {
+  const [at, setAt] = useState<DOMRect | null>(null)
+  return (
+    <>
+      <button className="btn-icon" aria-label="Response options" title="More" onClick={(e) => setAt(e.currentTarget.getBoundingClientRect())}>
+        <MoreHorizontal size={16} />
+      </button>
+      {at && <Menu style={{ left: at.right - 200, top: at.bottom + 4 }} onClose={() => setAt(null)} items={items} />}
+    </>
+  )
+}
+
+export function ResponseViewer({ report, sending, onCancel, onSaveBody, onSaveExample, past, onShowPast, onClear }: Props) {
   const [section, setSection] = useState<Section>('body')
   const [mode, setMode] = useState<BodyMode>('pretty')
   const [filter, setFilter] = useState<TestFilter>('all')
@@ -38,10 +81,18 @@ export function ResponseViewer({ report, sending, onCancel, onSaveBody, onSaveEx
       </div>
     )
   }
+  const titleRow = (
+    <div className="response-title-row">
+      <span className="response-title">Response</span>
+      <HistoryButton past={past} current={report} onShow={onShowPast} />
+      <span className="spacer" />
+      {report && <MoreButton items={[{ label: 'Clear response', onClick: onClear }]} />}
+    </div>
+  )
   if (!report || !res) {
     return (
       <div className="response">
-        <div className="response-title">Response</div>
+        {titleRow}
         <div className="response-center grow">
           <p className="muted">Enter the URL and click Send to get a response</p>
         </div>
@@ -62,7 +113,7 @@ export function ResponseViewer({ report, sending, onCancel, onSaveBody, onSaveEx
   if (!res.ok) {
     return (
       <div className="response">
-        <div className="response-title">Response</div>
+        {titleRow}
         {scriptErrors}
         <div className="response-center grow" data-testid="response-error">
           <p className="error-title">Could not send request</p>
@@ -97,21 +148,22 @@ export function ResponseViewer({ report, sending, onCancel, onSaveBody, onSaveEx
           </button>
         </div>
         <div className="response-meta">
-          <span>
-            Status: <b data-testid="response-status" className={res.code < 400 ? 'status-ok' : 'status-bad'}>{res.code} {res.status}</b>
-          </span>
-          <span>
-            Time: <b className="status-ok">{Math.round(res.timeMs)} ms</b>
-          </span>
-          <span>
-            Size: <b className="status-ok">{formatBytes(res.size)}</b>
-          </span>
-          <button className="btn-icon" title="Save as example" aria-label="Save as example" onClick={onSaveExample}>
-            <Save size={14} />
-          </button>
-          <button className="btn-icon" title="Save response to file" aria-label="Save response to file" onClick={onSaveBody}>
-            <Download size={14} />
-          </button>
+          <b data-testid="response-status" className={`status-pill ${res.code < 400 ? 'ok' : 'bad'}`}>
+            {res.code} {res.status}
+          </b>
+          <span className="meta-sep">·</span>
+          <span title="Time">{Math.round(res.timeMs)} ms</span>
+          <span className="meta-sep">·</span>
+          <span title="Size">{formatBytes(res.size)}</span>
+          <HistoryButton past={past} current={report} onShow={onShowPast} />
+          <MoreButton
+            items={[
+              { label: 'Save as example', onClick: onSaveExample },
+              { label: 'Save response to file', onClick: onSaveBody },
+              'separator',
+              { label: 'Clear response', onClick: onClear },
+            ]}
+          />
         </div>
       </div>
       {scriptErrors}

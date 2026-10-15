@@ -28,6 +28,8 @@ export interface Tab {
   saved: string
   sendId?: string
   report?: RunReport
+  /** This session's responses for the tab, newest first (Response › History). Not persisted. */
+  past?: { ts: number; report: RunReport }[]
   /** Opened by a single click in the sidebar (italic title): the next single click replaces it. Editing or double-clicking pins it. */
   preview?: boolean
 }
@@ -83,7 +85,10 @@ export type Action =
   /** After saving; `id` is set when a draft was saved into a collection. */
   | { type: 'saved'; key: string; doc: TabDoc; id?: string }
   | { type: 'sendStart'; key: string; sendId: string }
-  | { type: 'sendDone'; key: string; sendId: string; report: RunReport }
+  | { type: 'sendDone'; key: string; sendId: string; report: RunReport; ts?: number }
+  /** Show an earlier response from the tab's history. */
+  | { type: 'showReport'; key: string; index: number }
+  | { type: 'clearReport'; key: string }
   | { type: 'error'; error: string | null }
 
 export const isDirty = (t: Tab) => stableStringify(t.doc) !== t.saved
@@ -236,8 +241,12 @@ export function reducer(s: State, a: Action): State {
       return mapTab(
         s,
         (t) => t.key === a.key && t.sendId === a.sendId,
-        (t) => ({ ...t, sendId: undefined, report: a.report }),
+        (t) => ({ ...t, sendId: undefined, report: a.report, past: [{ ts: a.ts ?? Date.now(), report: a.report }, ...(t.past ?? [])].slice(0, 10) }),
       )
+    case 'showReport':
+      return mapTab(s, (t) => t.key === a.key && !!t.past?.[a.index], (t) => ({ ...t, report: t.past![a.index].report }))
+    case 'clearReport':
+      return mapTab(s, (t) => t.key === a.key, (t) => ({ ...t, report: undefined }))
     case 'error':
       return { ...s, error: a.error }
   }
