@@ -3,7 +3,6 @@
 A local-only API client that looks and works like the Postman desktop app — no account, no cloud,
 no AI. Collections live as plain JSON files in a folder you choose, so you can keep them in git.
 
-Screenshots of every screen: [`docs/screenshots`](docs/screenshots/README.md) ·
 Design: [`docs/superpowers/specs/2026-10-15-pm-local-design.md`](docs/superpowers/specs/2026-10-15-pm-local-design.md) ·
 Visual reference: [`docs/reference/README.md`](docs/reference/README.md)
 
@@ -90,4 +89,5 @@ npm run typecheck
 npm test            # unit + integration (Vitest)
 npm run test:e2e    # drives the real Electron app (Playwright)
 PM_LOCAL_EXE="dist/win-unpacked/PM Local.exe" npx playwright test e2e/packaged.spec.ts   # packaged app
+PM_LOCAL_GALLERY=1 npx playwright test e2e/gallery.spec.ts   # screenshots of every screen → docs/screenshots/ (not committed)
 ```
