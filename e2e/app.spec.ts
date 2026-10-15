@@ -1,5 +1,5 @@
 import { _electron as electron, expect, test, type ElectronApplication, type Page } from '@playwright/test'
-import { mkdtemp, readFile } from 'node:fs/promises'
+import { mkdtemp, readdir, readFile } from 'node:fs/promises'
 import http from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
@@ -442,6 +442,7 @@ test('tab context menu closes others / left / right; URL text sits in the middle
   expect(Math.abs(line.y + line.height / 2 - (box.y + box.height / 2))).toBeLessThan(2)
   // Clicking the empty space below the text still focuses the input.
   await page.mouse.click(box.x + box.width - 20, box.y + box.height - 3)
+  await expect(urlBar(page)).toBeFocused()
   await page.keyboard.type('x')
   await expect(urlBar(page)).toHaveText('x')
 
@@ -454,10 +455,14 @@ test('tab context menu closes others / left / right; URL text sits in the middle
 test('sidebar like Postman: preview tabs, double-click to keep, favorites, duplicate, search', async () => {
   const app = await launch(await temp('pml-ud-'))
   const page = await app.firstWindow()
-  await stubDialogs(app, await temp('pml-ws-'))
+  const dir = await temp('pml-ws-')
+  await stubDialogs(app, dir)
   await openWorkspace(page)
   await newCollectionWithRequest(page, 'Zoo', 'Lions')
+  // Ctrl+S straight after the rename must save the renamed file, not re-create "New Request".
   await page.keyboard.press('ControlOrMeta+s')
+  await expect.poll(async () => (await readdir(join(dir, 'collections', 'Zoo'))).sort()).toEqual(['Lions.request.json', 'collection.json'])
+  await expect(page.getByLabel('Unsaved changes')).toHaveCount(0)
   await rowActions(page, 'Zoo')
   await page.getByRole('menuitem', { name: 'Add request' }).click()
   await page.getByLabel('Name').fill('Tigers')

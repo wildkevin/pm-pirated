@@ -25,7 +25,7 @@ import { CaptureView } from './components/CaptureView'
 import { Sidebar, type Panel, type SidebarActions } from './components/Sidebar'
 import { TabsBar } from './components/TabsBar'
 import { VariablesEditor } from './components/VariablesEditor'
-import { activeTab, initialState, isDirty, newDraft, reducer, tabTitle, toUiState, type Tab, type TabDoc } from './state'
+import { activeTab, initialState, isDirty, newDraft, reducer, tabTitle, toUiState, type Action, type Tab, type TabDoc } from './state'
 import { AppHeader, type SearchHit } from './components/AppHeader'
 
 let seq = 0
@@ -51,6 +51,19 @@ export function App() {
   const [state, dispatch] = useReducer(reducer, initialState)
   const stateRef = useRef(state)
   stateRef.current = state
+  /** Dispatch and update stateRef right away, so the next queued operation sees fresh ids. */
+  const act = (a: Action) => {
+    stateRef.current = reducer(stateRef.current, a)
+    dispatch(a)
+  }
+  // Workspace file operations run one at a time: e.g. Ctrl+S right after a rename must save to the
+  // renamed file, not re-create the old one.
+  const chain = useRef<Promise<unknown>>(Promise.resolve())
+  const serial = <T,>(fn: () => Promise<T>): Promise<T> => {
+    const next = chain.current.then(fn, fn)
+    chain.current = next.catch(() => undefined)
+    return next
+  }
   const [panel, setPanel] = useState<Panel>('collections')
   const [renamingId, setRenamingId] = useState<string | null>(null)
   const [history, setHistory] = useState<HistoryEntry[]>([])
@@ -218,29 +231,34 @@ export function App() {
     })
 
   // --- saving ---
-  const save = (tab: Tab) =>
-    run(async () => {
-      const doc = tab.doc
-      if (doc.kind === 'request') {
-        if (tab.id === null) return setModal({ kind: 'save', key: tab.key })
-        const workspace = await window.api.saveRequest(tab.id, doc.item)
-        dispatch({ type: 'saved', key: tab.key, doc })
-        dispatch({ type: 'workspace', workspace })
-      } else if (doc.kind === 'container') {
-        const { auth, event, description } = doc.container
-        let workspace = await window.api.saveContainer(tab.id!, { auth, event, description })
-        if (doc.variables) {
-          await window.api.saveVariables(`col:${tab.id}`, doc.variables)
-          workspace = await window.api.refreshWorkspace()
+  const save = (target: Tab) =>
+    run(() =>
+      serial(async () => {
+        // The tab as it is now (a rename may have moved its file since the save was asked for).
+        const tab = stateRef.current.tabs.find((t) => t.key === target.key)
+        if (!tab) return
+        const doc = tab.doc
+        if (doc.kind === 'request') {
+          if (tab.id === null) return setModal({ kind: 'save', key: tab.key })
+          const workspace = await window.api.saveRequest(tab.id, doc.item)
+          act({ type: 'saved', key: tab.key, doc })
+          act({ type: 'workspace', workspace })
+        } else if (doc.kind === 'container') {
+          const { auth, event, description } = doc.container
+          let workspace = await window.api.saveContainer(tab.id!, { auth, event, description })
+          if (doc.variables) {
+            await window.api.saveVariables(`col:${tab.id}`, doc.variables)
+            workspace = await window.api.refreshWorkspace()
+          }
+          act({ type: 'saved', key: tab.key, doc })
+          act({ type: 'workspace', workspace })
+        } else if (doc.kind === 'variables') {
+          await window.api.saveVariables(tab.id!, doc.rows)
+          act({ type: 'saved', key: tab.key, doc })
         }
-        dispatch({ type: 'saved', key: tab.key, doc })
-        dispatch({ type: 'workspace', workspace })
-      } else if (doc.kind === 'variables') {
-        await window.api.saveVariables(tab.id!, doc.rows)
-        dispatch({ type: 'saved', key: tab.key, doc })
-      }
-      refreshResolved()
-    })
+        refreshResolved()
+      }),
+    )
 
   /** After scripts ran, reload open variable editors that have no unsaved edits. */
   const reloadVariableTabs = () =>
@@ -351,75 +369,93 @@ export function App() {
     openRequest: (id, preview) => void openRequest(id, preview),
     openContainer: (id, preview) => void openContainer(id, preview),
     createCollection: () =>
-      void run(async () => {
-        setPanel('collections')
-        const { workspace, id } = await window.api.createCollection('New Collection')
-        dispatch({ type: 'workspace', workspace })
-        setRenamingId(id)
-      }),
+      void run(() =>
+        serial(async () => {
+          setPanel('collections')
+          const { workspace, id } = await window.api.createCollection('New Collection')
+          act({ type: 'workspace', workspace })
+          setRenamingId(id)
+        }),
+      ),
     createFolder: (parentId) =>
-      void run(async () => {
-        const { workspace, id } = await window.api.createFolder(parentId, 'New Folder')
-        dispatch({ type: 'workspace', workspace })
-        setRenamingId(id)
-      }),
+      void run(() =>
+        serial(async () => {
+          const { workspace, id } = await window.api.createFolder(parentId, 'New Folder')
+          act({ type: 'workspace', workspace })
+          setRenamingId(id)
+        }),
+      ),
     createRequest: (parentId) =>
-      void run(async () => {
-        const { workspace, id } = await window.api.createRequest(parentId, 'New Request')
-        dispatch({ type: 'workspace', workspace })
-        await openRequest(id)
-        setRenamingId(id)
-      }),
+      void run(() =>
+        serial(async () => {
+          const { workspace, id } = await window.api.createRequest(parentId, 'New Request')
+          act({ type: 'workspace', workspace })
+          await openRequest(id)
+          setRenamingId(id)
+        }),
+      ),
     rename: (id, name) =>
-      void run(async () => {
-        setRenamingId(null)
-        const { workspace, id: newId } = await window.api.renameNode(id, name)
-        dispatch({ type: 'renamed', id, newId, name })
-        dispatch({ type: 'workspace', workspace })
-      }),
+      void run(() =>
+        serial(async () => {
+          setRenamingId(null)
+          const { workspace, id: newId } = await window.api.renameNode(id, name)
+          act({ type: 'renamed', id, newId, name })
+          act({ type: 'workspace', workspace })
+        }),
+      ),
     startRename: setRenamingId,
     duplicate: (id) =>
-      void run(async () => {
-        const { workspace } = await window.api.duplicateNode(id)
-        dispatch({ type: 'workspace', workspace })
-      }),
+      void run(() =>
+        serial(async () => {
+          const { workspace } = await window.api.duplicateNode(id)
+          act({ type: 'workspace', workspace })
+        }),
+      ),
     toggleFavorite: (id) => dispatch({ type: 'toggleFavorite', id }),
     openWorkspace: () => void openWorkspace(),
     remove: (id, name) =>
-      void run(async () => {
-        if (!window.confirm(`Delete "${name}"? This removes it from disk.`)) return
-        const workspace = await window.api.deleteNode(id)
-        dispatch({ type: 'removed', id })
-        dispatch({ type: 'workspace', workspace })
-      }),
+      void run(() =>
+        serial(async () => {
+          if (!window.confirm(`Delete "${name}"? This removes it from disk.`)) return
+          const workspace = await window.api.deleteNode(id)
+          act({ type: 'removed', id })
+          act({ type: 'workspace', workspace })
+        }),
+      ),
     exportCollection: (id) => void run(() => window.api.exportCollection(id)),
     runCollection: (id) => dispatch({ type: 'openRunner', target: id }),
     loadTest: (id) => dispatch({ type: 'openLoad', target: id }),
     openVariables: (scope, title) => void openVariables(scope, title),
     createEnvironment: () =>
-      void run(async () => {
-        setPanel('environments')
-        const { workspace, id } = await window.api.createEnvironment('New Environment')
-        dispatch({ type: 'workspace', workspace })
-        await openVariables(`env:${id}`, 'New Environment')
-        setRenamingId(id)
-      }),
+      void run(() =>
+        serial(async () => {
+          setPanel('environments')
+          const { workspace, id } = await window.api.createEnvironment('New Environment')
+          act({ type: 'workspace', workspace })
+          await openVariables(`env:${id}`, 'New Environment')
+          setRenamingId(id)
+        }),
+      ),
     renameEnvironment: (id, name) =>
-      void run(async () => {
-        setRenamingId(null)
-        const { workspace, id: newId } = await window.api.renameEnvironment(id, name)
-        dispatch({ type: 'renamed', id: `env:${id}`, newId: `env:${newId}`, name })
-        if (stateRef.current.activeEnvironment === id) dispatch({ type: 'environment', id: newId })
-        dispatch({ type: 'workspace', workspace })
-      }),
+      void run(() =>
+        serial(async () => {
+          setRenamingId(null)
+          const { workspace, id: newId } = await window.api.renameEnvironment(id, name)
+          act({ type: 'renamed', id: `env:${id}`, newId: `env:${newId}`, name })
+          if (stateRef.current.activeEnvironment === id) act({ type: 'environment', id: newId })
+          act({ type: 'workspace', workspace })
+        }),
+      ),
     deleteEnvironment: (id, name) =>
-      void run(async () => {
-        if (!window.confirm(`Delete environment "${name}"?`)) return
-        const workspace = await window.api.deleteEnvironment(id)
-        dispatch({ type: 'removed', id: `env:${id}` })
-        if (stateRef.current.activeEnvironment === id) dispatch({ type: 'environment', id: null })
-        dispatch({ type: 'workspace', workspace })
-      }),
+      void run(() =>
+        serial(async () => {
+          if (!window.confirm(`Delete environment "${name}"?`)) return
+          const workspace = await window.api.deleteEnvironment(id)
+          act({ type: 'removed', id: `env:${id}` })
+          if (stateRef.current.activeEnvironment === id) act({ type: 'environment', id: null })
+          act({ type: 'workspace', workspace })
+        }),
+      ),
     exportEnvironment: (id) => void run(() => window.api.exportEnvironment(id)),
     setActiveEnvironment: (id) => dispatch({ type: 'environment', id }),
     openHistory: (entry) => dispatch({ type: 'openDraft', item: { ...entry.item, name: rawUrl(entry.item.request.url) || entry.item.name } }),
