@@ -19,7 +19,7 @@ much like the Postman desktop app (reference: Postman 12.32.3 for macOS, statica
 
 Accounts/login, cloud sync, workspaces-in-the-cloud, teams, Postman Vault cloud integrations,
 AI (Postbot, Agent Mode, LLM requests), MCP (client and servers), Flows, monitors, API
-governance, telemetry/analytics/crash reporting, auto-update, installers/code signing,
+governance, telemetry/analytics/crash reporting, auto-update, installers (MSI/NSIS setup), code signing,
 `pm.require` cloud packages, plugin auto-install.
 
 ### Deferred (later versions, not v1)
@@ -46,7 +46,12 @@ From static analysis of the shipped `app.asar` (563 files, integrity-verified):
 
 - **Runs on a Windows company laptop:** corporate HTTP proxy (possibly PAC), custom corporate
   root CAs, no admin rights, npm packages via the company Nexus mirror.
-- **Launched with `npm install` + `npm start`.** No installer, no packaging, no auto-update.
+- **Development and early use: `npm install` + `npm start`.** End state (M7): a portable Windows
+  `PM Local.exe` that runs on double-click with nothing installed — electron-builder `portable`
+  target (single self-extracting exe) plus a zipped unpacked folder (`win-unpacked`, instant start;
+  fallback if policy blocks executables extracted to temp). Built on GitHub Actions
+  `windows-latest` and published as workflow artifacts. Unsigned; no installer, no auto-update.
+  App data stays in `%APPDATA%/pm-local` (DPAPI-encrypted secrets are bound to the Windows user).
 - **No native Node modules** (nothing needing node-gyp/prebuild downloads). All dependencies must
   be pure JS/WASM and resolvable from Nexus.
 - **Electron binary download:** `npm install` downloads Electron from GitHub by default; the
@@ -279,4 +284,4 @@ Each milestone is usable on its own and gets its own implementation plan.
 | M4 | Mock servers |
 | M5 | Capture proxy |
 | M6 | Load testing |
-| M7 | Hardening and polish on the Windows laptop: Nexus/ELECTRON_MIRROR install guide, proxy/CA edge cases, keyboard shortcuts, performance with large collections |
+| M7 | Portable `PM Local.exe` + zipped folder built in CI; hardening and polish on the Windows laptop: Nexus/ELECTRON_MIRROR install guide, proxy/CA edge cases, keyboard shortcuts, performance with large collections |
