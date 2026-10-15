@@ -10,3 +10,4 @@ docs/reference/private/
 !/build/icon.png
 docs/screenshots/
 .pmref/
+.qa/
