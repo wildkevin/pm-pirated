@@ -60,6 +60,7 @@ export type Action =
   // Tab-level actions (addressed by tab key)
   | { type: 'activate'; key: string }
   | { type: 'close'; key: string }
+  | { type: 'closeMany'; keys: string[] }
   /** A patch, not a full item: a stale render must not overwrite fields changed meanwhile (e.g. the name). */
   | { type: 'edit'; key: string; patch: Partial<PmRequest> }
   | { type: 'editItem'; key: string; patch: Partial<Omit<PmItem, 'request' | 'name'>> }
@@ -154,6 +155,8 @@ export function reducer(s: State, a: Action): State {
       return { ...s, activeKey: a.key }
     case 'close':
       return closeTabs(s, (t) => t.key === a.key)
+    case 'closeMany':
+      return closeTabs(s, (t) => a.keys.includes(t.key))
     case 'edit':
       return mapTab(
         s,

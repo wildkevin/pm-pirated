@@ -31,6 +31,15 @@ describe('tabs', () => {
     expect(s.activeKey).toBeNull()
   })
 
+  it('closes many tabs at once; a closed active tab hands over to the surviving neighbour', () => {
+    let s = withTabs('a', 'b', 'c', 'd')
+    s = reducer(s, { type: 'closeMany', keys: [keyOf(s, 'c'), keyOf(s, 'd')] }) // "to the right of b", d active
+    expect(s.tabs.map((t) => t.id)).toEqual(['a', 'b'])
+    expect(activeId(s)).toBe('b')
+    s = reducer(s, { type: 'closeMany', keys: [keyOf(s, 'b')] }) // "others than a"
+    expect(activeId(s)).toBe('a')
+  })
+
   it('tracks dirty state across edits and saves', () => {
     let s = withTabs('a')
     const key = keyOf(s, 'a')

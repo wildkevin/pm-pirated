@@ -1,4 +1,5 @@
-// Generates build/icon.png (512×512): an orange rounded square with a white paper-plane shape.
+// Generates build/icon.png (512×512): an orange circle (Postman's badge shape and colour) with a white
+// paper plane — related, without copying Postman's trademarked logo. 4×4 supersampled edges.
 // Plain zlib + a hand-written PNG encoder, so no image dependencies are needed.
 import { writeFileSync } from 'node:fs'
 import { deflateSync } from 'node:zlib'
@@ -15,30 +16,40 @@ const inPoly = (x, y, poly) => {
   return inside
 }
 const plane = [
-  [120, 270],
-  [392, 140],
-  [300, 392],
-  [250, 300],
+  [132, 268],
+  [380, 152],
+  [296, 380],
+  [250, 296],
 ]
 const fold = [
-  [250, 300],
-  [392, 140],
-  [270, 330],
+  [250, 296],
+  [380, 152],
+  [268, 324],
 ]
-const r = 96
+const colour = (x, y) => {
+  if ((x - S / 2) ** 2 + (y - S / 2) ** 2 > (S / 2 - 8) ** 2) return null
+  if (inPoly(x, y, plane)) return inPoly(x, y, fold) ? [255, 214, 196] : [255, 255, 255]
+  return [255, 108, 55] // brand orange
+}
+const N = 4
 for (let y = 0; y < S; y++) {
   for (let x = 0; x < S; x++) {
+    let [R, G, B, A] = [0, 0, 0, 0]
+    for (let sy = 0; sy < N; sy++)
+      for (let sx = 0; sx < N; sx++) {
+        const c = colour(x + (sx + 0.5) / N, y + (sy + 0.5) / N)
+        if (!c) continue
+        R += c[0]
+        G += c[1]
+        B += c[2]
+        A++
+      }
     const i = (y * S + x) * 4
-    const cx = Math.min(Math.max(x, r), S - r)
-    const cy = Math.min(Math.max(y, r), S - r)
-    const inside = (x - cx) ** 2 + (y - cy) ** 2 <= r * r
-    if (!inside) continue
-    let [R, G, B] = [255, 108, 55] // brand orange
-    if (inPoly(x + 0.5, y + 0.5, plane)) [R, G, B] = inPoly(x + 0.5, y + 0.5, fold) ? [255, 214, 196] : [255, 255, 255]
-    px[i] = R
-    px[i + 1] = G
-    px[i + 2] = B
-    px[i + 3] = 255
+    if (!A) continue
+    px[i] = R / A
+    px[i + 1] = G / A
+    px[i + 2] = B / A
+    px[i + 3] = (A * 255) / (N * N)
   }
 }
 const crcTable = Array.from({ length: 256 }, (_, n) => {

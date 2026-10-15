@@ -77,7 +77,8 @@ function tooltip(resolve: Resolve) {
 }
 
 const theme = EditorView.theme({
-  '&': { fontSize: '13px', height: '100%', flex: '1', minWidth: '0' },
+  // One line tall; .var-input centres it in the taller URL box.
+  '&': { fontSize: '13px', flex: '1', minWidth: '0' },
   '&.cm-focused': { outline: 'none' },
   '.cm-scroller': { fontFamily: 'var(--font-ui)', overflow: 'hidden', alignItems: 'center' },
   '.cm-content': { padding: '0', whiteSpace: 'pre' },
@@ -153,5 +154,13 @@ export function VarInput({ value, onChange, onEnter, onPasteCurl, resolve, place
     view.current?.dispatch({ effects: vars.current.reconfigure([highlighter(resolve), tooltip(resolve)]) })
   }, [resolve])
 
-  return <div className="var-input" ref={host} />
+  // The box is taller than the line: clicks above/below it still focus the input (cursor at the end).
+  const focusFromBox = (e: React.MouseEvent) => {
+    const v = view.current
+    if (!v || e.target !== host.current) return
+    e.preventDefault()
+    v.focus()
+    v.dispatch({ selection: { anchor: v.state.doc.length } })
+  }
+  return <div className="var-input" ref={host} onMouseDown={focusFromBox} />
 }

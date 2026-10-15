@@ -108,9 +108,16 @@ kbd {
   background: var(--bg-primary);
 }
 .brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   font-weight: 600;
   font-size: var(--text-l);
   color: var(--brand);
+}
+.brand-logo {
+  width: 22px;
+  height: 22px;
 }
 .header-spacer {
   flex: 1;

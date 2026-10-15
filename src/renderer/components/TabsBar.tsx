@@ -4,12 +4,14 @@ import type { EnvironmentInfo } from '../../shared/format/types'
 import type { ResolvedVariable } from '../../shared/ipc'
 import { methodClass, methodLabel } from '../lib/methods'
 import { isDirty, tabTitle, type Tab } from '../state'
+import { Menu } from './common/ui'
 
 interface Props {
   tabs: Tab[]
   activeKey: string | null
   onActivate(key: string): void
   onClose(tab: Tab): void
+  onCloseMany(tabs: Tab[]): void
   onNew(): void
   environments: EnvironmentInfo[]
   activeEnvironment: string | null
@@ -33,6 +35,21 @@ function TabIcon({ tab }: { tab: Tab }) {
 
 export function TabsBar(p: Props) {
   const [look, setLook] = useState(false)
+  const [menu, setMenu] = useState<{ x: number; y: number; key: string } | null>(null)
+  const menuItems = (key: string) => {
+    const i = p.tabs.findIndex((t) => t.key === key)
+    const tab = p.tabs[i]
+    if (!tab) return []
+    const others = p.tabs.filter((t) => t.key !== key)
+    const close = (tabs: Tab[]) => () => p.onCloseMany(tabs)
+    return [
+      { label: 'Close tab', onClick: () => p.onClose(tab) },
+      ...(others.length ? [{ label: 'Close other tabs', onClick: close(others) }] : []),
+      ...(i > 0 ? [{ label: 'Close tabs to the left', onClick: close(p.tabs.slice(0, i)) }] : []),
+      ...(i < p.tabs.length - 1 ? [{ label: 'Close tabs to the right', onClick: close(p.tabs.slice(i + 1)) }] : []),
+      { label: 'Close all tabs', onClick: () => p.onCloseMany(p.tabs) },
+    ]
+  }
   return (
     <div className="tabs-row">
       <div className="tabs" role="tablist">
@@ -47,6 +64,10 @@ export function TabsBar(p: Props) {
               title={title}
               onClick={() => p.onActivate(tab.key)}
               onAuxClick={(e) => e.button === 1 && p.onClose(tab)}
+              onContextMenu={(e) => {
+                e.preventDefault()
+                setMenu({ x: e.clientX, y: e.clientY, key: tab.key })
+              }}
             >
               <TabIcon tab={tab} />
               <span className="tab-name">{title}</span>
@@ -68,6 +89,7 @@ export function TabsBar(p: Props) {
           <Plus size={16} />
         </button>
       </div>
+      {menu && <Menu style={{ left: menu.x, top: menu.y }} onClose={() => setMenu(null)} items={menuItems(menu.key)} />}
       <div className="env-selector">
         <select aria-label="Environment" className="select env-select" value={p.activeEnvironment ?? ''} onChange={(e) => p.onEnvironment(e.target.value || null)}>
           <option value="">No Environment</option>

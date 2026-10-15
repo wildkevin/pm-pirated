@@ -1,4 +1,7 @@
+/// <reference types="electron-vite/node" />
 import { app, safeStorage, session, utilityProcess } from 'electron'
+// Copied into out/ by electron-vite, so `npm start` shows our icon instead of Electron's.
+import icon from '../../build/icon.png?asset'
 import { join } from 'node:path'
 import { safeStorageCrypt } from './crypto'
 import { CAPTURE_EVENT, MOCK_EVENT } from '../shared/ipc'
@@ -77,7 +80,8 @@ if (!app.requestSingleInstanceLock()) {
     const saveZoom = (zoomLevel: number) => {
       if (zoomLevel !== settings.get().zoomLevel) void settings.save({ ...settings.get(), zoomLevel })
     }
-    const win = createMainWindow(saveZoom)
+    app.dock?.setIcon(icon)
+    const win = createMainWindow(saveZoom, icon)
     win.webContents.on('did-finish-load', () => win.webContents.setZoomLevel(settings.get().zoomLevel))
     win.on('close', () => saveZoom(win.webContents.getZoomLevel()))
     const mockClient = new MockClient(forkMocks, (code) => console.error(`Mock server process exited with code ${code}`))

@@ -58,8 +58,8 @@ export function nextZoom(level: number, key: string): number | null {
   return null
 }
 
-export function createMainWindow(onZoom: (level: number) => void = () => undefined): BrowserWindow {
-  const win = new BrowserWindow(mainWindowOptions(join(__dirname, '../preload/index.js')))
+export function createMainWindow(onZoom: (level: number) => void = () => undefined, icon?: string): BrowserWindow {
+  const win = new BrowserWindow({ ...mainWindowOptions(join(__dirname, '../preload/index.js')), icon })
   const loc = rendererLocation()
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
   win.webContents.on('will-navigate', (e, url) => {

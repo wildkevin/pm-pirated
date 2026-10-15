@@ -400,3 +400,37 @@ test('zoom with Ctrl+= / Ctrl+- / Ctrl+0 is remembered; the sidebar can be hidde
   await expect.poll(() => zoom(app)).toBe(0)
   await app.close()
 })
+
+test('tab context menu closes others / left / right; URL text sits in the middle of the URL box', async () => {
+  const app = await launch(await temp('pml-ud-'))
+  const page = await app.firstWindow()
+  page.on('dialog', (d) => void d.accept())
+  await stubDialogs(app, await temp('pml-ws-'))
+  await openWorkspace(page)
+  for (let i = 0; i < 5; i++) await page.getByRole('button', { name: 'New request tab' }).click()
+  const tabs = page.locator('.tabs [role=tab]')
+  await expect(tabs).toHaveCount(5)
+
+  await tabs.nth(1).click({ button: 'right' })
+  await page.getByRole('menuitem', { name: 'Close tabs to the left' }).click()
+  await expect(tabs).toHaveCount(4)
+  await tabs.nth(1).click({ button: 'right' })
+  await page.getByRole('menuitem', { name: 'Close tabs to the right' }).click()
+  await expect(tabs).toHaveCount(2)
+  await tabs.nth(0).click({ button: 'right' })
+  await page.getByRole('menuitem', { name: 'Close other tabs' }).click()
+  await expect(tabs).toHaveCount(1)
+
+  const box = (await page.locator('.url-group').boundingBox())!
+  const line = (await page.locator('.var-input .cm-line').boundingBox())!
+  expect(Math.abs(line.y + line.height / 2 - (box.y + box.height / 2))).toBeLessThan(2)
+  // Clicking the empty space below the text still focuses the input.
+  await page.mouse.click(box.x + box.width - 20, box.y + box.height - 3)
+  await page.keyboard.type('x')
+  await expect(urlBar(page)).toHaveText('x')
+
+  await tabs.nth(0).click({ button: 'right' })
+  await page.getByRole('menuitem', { name: 'Close all tabs' }).click()
+  await expect(tabs).toHaveCount(0)
+  await app.close()
+})

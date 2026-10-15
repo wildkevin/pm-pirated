@@ -26,6 +26,7 @@ import { Sidebar, type Panel, type SidebarActions } from './components/Sidebar'
 import { TabsBar } from './components/TabsBar'
 import { VariablesEditor } from './components/VariablesEditor'
 import { activeTab, initialState, isDirty, newDraft, reducer, tabTitle, toUiState, type Tab, type TabDoc } from './state'
+import logo from '../../build/icon.png'
 
 let seq = 0
 const nextId = () => `${Date.now()}-${++seq}`
@@ -252,6 +253,13 @@ export function App() {
   const close = (tab: Tab) => {
     if (isDirty(tab) && !window.confirm(`"${tabTitle(tab)}" has unsaved changes. Close without saving?`)) return
     dispatch({ type: 'close', key: tab.key })
+  }
+
+  /** Context-menu closes: one confirmation for all unsaved tabs among them. */
+  const closeMany = (tabs: Tab[]) => {
+    const dirty = tabs.filter(isDirty)
+    if (dirty.length && !window.confirm(`${dirty.length} tab${dirty.length > 1 ? 's have' : ' has'} unsaved changes. Close without saving?`)) return
+    dispatch({ type: 'closeMany', keys: tabs.map((t) => t.key) })
   }
 
   const newRequestTab = () => dispatch({ type: 'openDraft', item: newDraft() })
@@ -578,7 +586,10 @@ export function App() {
   return (
     <div className="app">
       <header className="header">
-        <span className="brand">PM Local</span>
+        <span className="brand">
+          <img src={logo} alt="" className="brand-logo" />
+          PM Local
+        </span>
         <span className="header-spacer" />
         <button className="btn-icon header-icon" aria-label="Settings" title="Settings" onClick={() => setModal({ kind: 'settings' })}>
           <SettingsIcon size={18} />
@@ -613,6 +624,7 @@ export function App() {
                       activeKey={state.activeKey}
                       onActivate={(key) => dispatch({ type: 'activate', key })}
                       onClose={close}
+                      onCloseMany={closeMany}
                       onNew={newRequestTab}
                       environments={state.workspace.environments}
                       activeEnvironment={state.activeEnvironment}
