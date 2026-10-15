@@ -5,6 +5,7 @@ import { promisify } from 'node:util'
 import { Url } from 'postman-collection'
 import curlToPostman from 'curl-to-postmanv2'
 import { COLLECTION_SCHEMA, type PmContainer, type PmEvent, type PmItem, type PmKeyValue, type PmRequest, type PmUrl, type PmVariable } from '../../shared/format/types'
+import { rawUrl, setQueryParams } from '../../shared/format/url'
 import type { ImportResult } from '../../shared/ipc'
 import { WorkspaceError, createCollection, createFolder, createRequest, readContainer, readRequest, resolveInside } from './store'
 import { Variables, createEnvironment, resolveEnvPath, type VariableRow } from './variables'
@@ -25,8 +26,14 @@ function normalizeUrl(url: unknown): PmUrl {
       raw = ''
     }
   }
+  const decode = (value: unknown) => { const text = String(value ?? ''); try { return decodeURIComponent(text) } catch { return text } }
   const query: PmKeyValue[] | undefined = Array.isArray(u.query)
-    ? u.query.map((q: Json) => ({ key: String(q.key ?? ''), value: q.value == null ? '' : String(q.value), ...(q.disabled ? { disabled: true } : {}) }))
+    ? u.query.map((q: Json) => ({
+        key: decode(q.key), value: decode(q.value),
+        ...(q.value == null ? { hasEquals: false } : q.value === '' ? { hasEquals: true } : {}),
+        ...(q.disabled ? { disabled: true } : {}),
+        ...(q.description ? { description: typeof q.description === 'string' ? q.description : (q.description.content ?? '') } : {}),
+      }))
     : undefined
   const variable: PmKeyValue[] | undefined = Array.isArray(u.variable)
     ? u.variable.map((v: Json) => ({
@@ -35,7 +42,7 @@ function normalizeUrl(url: unknown): PmUrl {
         ...(v.description ? { description: typeof v.description === 'string' ? v.description : (v.description.content ?? '') } : {}),
       }))
     : undefined
-  const keepQuery = query?.some((q) => q.disabled)
+  const keepQuery = query?.some((q) => q.disabled || q.description)
   if (!keepQuery && !variable?.length) return raw
   return { raw, ...(keepQuery ? { query } : {}), ...(variable?.length ? { variable } : {}) }
 }
@@ -194,7 +201,19 @@ export async function curlToItem(text: string): Promise<PmItem> {
   if (body?.mode === 'formdata')
     body.formdata = body.formdata.map((p: Json) => (p.type === 'file' ? { key: p.key, type: 'file', src: p.value, value: '' } : p))
   const { description: _d, name: _n, ...request } = data
-  return { name: String(data.url ?? 'Imported request'), request: { ...normalizeRequest({ ...request, body }) }, response: [] }
+  // curl-to-postmanv2 ignores -u/--user: turn it into Basic auth, like Postman's importer.
+  const user = curlUser(text)
+  const auth = user ? { type: 'basic', basic: [{ key: 'username', value: user.username }, { key: 'password', value: user.password }] } : request.auth
+  return { name: String(data.url ?? 'Imported request'), request: { ...normalizeRequest({ ...request, body, ...(auth ? { auth } : {}) }) }, response: [] }
+}
+
+/** `-u user:pass` / `--user=user:pass` (quoted or not) from a cURL command. */
+export function curlUser(text: string): { username: string; password: string } | null {
+  const m = /(?:^|\s)(?:-u|--user)(?:\s+|=)(?:'([^']*)'|"((?:[^"\\]|\\.)*)"|(\S+))/.exec(text)
+  if (!m) return null
+  const value = m[1] ?? m[2]?.replace(/\\(.)/g, '$1') ?? m[3]
+  const i = value.indexOf(':')
+  return i === -1 ? { username: value, password: '' } : { username: value.slice(0, i), password: value.slice(i + 1) }
 }
 
 // --- export ---
@@ -205,7 +224,19 @@ export async function curlToItem(text: string): Promise<PmItem> {
  */
 function exportUrl(url: PmUrl): PmUrl {
   if (typeof url === 'string') return url
-  return { ...Url.parse(url.raw), ...url }
+  // Editor query rows contain decoded values. Runtime/export consumers expect the encoded
+  // values parsed from raw, including null for a bare flag and '' for an explicit empty=.
+  const parsed = Url.parse(url.raw)
+  const query = (Array.isArray(parsed.query) ? parsed.query : []).map((row: Json) => ({ ...row }))
+  const enabled = url.query?.filter(row => !row.disabled) ?? []
+  query.forEach((row, index) => { if (enabled[index]?.description) row.description = enabled[index].description })
+  url.query?.forEach((row, index) => {
+    if (!row.disabled) return
+    const encoded = Url.parse(rawUrl(setQueryParams('http://query.local/', [{ ...row, disabled: false }])))
+    const value = Array.isArray(encoded.query) ? encoded.query[0] : undefined
+    if (value) query.splice(Math.min(index, query.length), 0, { ...value, disabled: true, ...(row.description ? { description: row.description } : {}) })
+  })
+  return { ...url, ...parsed, raw: url.raw, query, ...(url.variable ? { variable: url.variable } : {}) } as PmUrl
 }
 
 async function exportTree(root: string, dirId: string, withIds: boolean): Promise<Json[]> {

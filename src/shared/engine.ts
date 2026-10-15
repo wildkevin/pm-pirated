@@ -52,6 +52,7 @@ export interface RunReport {
   logs: LogEntry[]
   scriptErrors: string[]
   sent?: SentRequest
+  timeline?: ({ kind: 'log'; log: LogEntry } | { kind: 'request'; sent: SentRequest; response: SendResult })[]
   /** Cookies stored for the request's URL after the response. */
   cookies: CookieInfo[]
 }

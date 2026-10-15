@@ -4,6 +4,7 @@ import http from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { rawUrl } from '../src/shared/format/url'
 
 const temp = (prefix: string) => mkdtemp(join(tmpdir(), prefix))
 let server: http.Server
@@ -102,9 +103,10 @@ test('build a POST with headers and a JSON body, send, save, and reopen after re
   await expect(page.getByLabel('Unsaved changes')).toHaveCount(0)
 
   const saved = JSON.parse(await readFile(join(dir, 'collections', 'Demo API', 'Echo.request.json'), 'utf8'))
+  expect(rawUrl(saved.request.url)).toBe(`${base}/echo?q=1`)
   expect(saved).toMatchObject({
     name: 'Echo',
-    request: { method: 'POST', url: `${base}/echo?q=1`, header: [{ key: 'X-Token', value: 'abc' }], body: { mode: 'raw', raw: '{"hello":"world"}' } },
+    request: { method: 'POST', header: [{ key: 'X-Token', value: 'abc' }], body: { mode: 'raw', raw: '{"hello":"world"}' } },
   })
   await app.close()
 

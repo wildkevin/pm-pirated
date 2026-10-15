@@ -1,7 +1,9 @@
-import { ChevronDown, Copy, History, MoreHorizontal } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { ChevronDown, Copy, History, MoreHorizontal, Search } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { openSearchPanel } from '@codemirror/search'
+import type { EditorView } from '@codemirror/view'
 import type { RunReport } from '../../../shared/engine'
-import { formatBytes, viewBody } from '../../lib/body'
+import { cleanError, formatBytes, viewBody } from '../../lib/body'
 import { CodeEditor, type EditorLanguage } from '../common/CodeEditor'
 import { Menu, type MenuItem } from '../common/ui'
 
@@ -10,10 +12,11 @@ type BodyMode = 'pretty' | 'raw' | 'preview'
 type TestFilter = 'all' | 'passed' | 'skipped' | 'failed'
 
 interface Props {
+  examples?: unknown[]
   report: RunReport | undefined
   sending: boolean
   onCancel(): void
-  onSaveBody(): void
+  onSaveBody(report: RunReport): void
   onSaveExample(): void
   /** This session's earlier responses (newest first). */
   past: { ts: number; report: RunReport }[]
@@ -24,7 +27,8 @@ interface Props {
 const pastLabel = (p: { ts: number; report: RunReport }) => {
   const r = p.report.response
   const time = new Date(p.ts).toLocaleTimeString()
-  return r.ok ? `${r.code} ${r.status} · ${Math.round(r.timeMs)} ms · ${time}` : `Error · ${time}`
+  const request = p.report.sent ? `${p.report.sent.method} ${p.report.sent.url} · ` : ''
+  return r.ok ? `${request}${r.code} ${r.status} · ${Math.round(r.timeMs)} ms · ${time}` : `${request}Error · ${time}`
 }
 
 /** "History ▾": earlier responses of this tab, like Postman's response history. */
@@ -59,7 +63,13 @@ function MoreButton({ items }: { items: MenuItem[] }) {
   )
 }
 
-export function ResponseViewer({ report, sending, onCancel, onSaveBody, onSaveExample, past, onShowPast, onClear }: Props) {
+export function ResponseViewer({ examples = [], report: liveReport, sending, onCancel, onSaveBody, onSaveExample, past, onShowPast, onClear }: Props) {
+  const [selectedExample, setSelectedExample] = useState<number | null>(null)
+  const [feedback, setFeedback] = useState('')
+  const editor = useRef<EditorView | null>(null)
+  useEffect(() => { setSelectedExample(null); setFeedback('') }, [liveReport, sending])
+  const report = selectedExample === null ? liveReport : exampleReport(examples[selectedExample]) ?? liveReport
+  const clear = () => { setSelectedExample(null); onClear() }
   const [section, setSection] = useState<Section>('body')
   const [mode, setMode] = useState<BodyMode>('pretty')
   const [filter, setFilter] = useState<TestFilter>('all')
@@ -84,9 +94,10 @@ export function ResponseViewer({ report, sending, onCancel, onSaveBody, onSaveEx
   const titleRow = (
     <div className="response-title-row">
       <span className="response-title">Response</span>
+      {examples.length > 0 && <select className="select" aria-label="Saved examples" value={selectedExample ?? ''} onChange={e => setSelectedExample(e.target.value === '' ? null : Number(e.target.value))}><option value="">Live response</option>{examples.map((example, index) => <option key={index} value={index}>{String((example as { name?: string })?.name ?? `Example ${index + 1}`)}</option>)}</select>}
       <HistoryButton past={past} current={report} onShow={onShowPast} />
       <span className="spacer" />
-      {report && <MoreButton items={[{ label: 'Clear response', onClick: onClear }]} />}
+      {report && <MoreButton items={[{ label: 'Clear response', onClick: clear }]} />}
     </div>
   )
   if (!report || !res) {
@@ -118,7 +129,7 @@ export function ResponseViewer({ report, sending, onCancel, onSaveBody, onSaveEx
         <div className="response-center grow" data-testid="response-error">
           <p className="error-title">Could not send request</p>
           <p className="error-detail">
-            {res.code && <code>{res.code}</code>} {res.error}
+            {res.code && <code>{res.code}</code>} {cleanError(res.error)}
           </p>
           <p className="muted">{hint(res.code, res.error)}</p>
         </div>
@@ -155,13 +166,14 @@ export function ResponseViewer({ report, sending, onCancel, onSaveBody, onSaveEx
           <span title="Time">{Math.round(res.timeMs)} ms</span>
           <span className="meta-sep">·</span>
           <span title="Size">{formatBytes(res.size)}</span>
-          <HistoryButton past={past} current={report} onShow={onShowPast} />
+          {examples.length > 0 && <select className="select" aria-label="Saved examples" value={selectedExample ?? ''} onChange={e => setSelectedExample(e.target.value === '' ? null : Number(e.target.value))}><option value="">Live response</option>{examples.map((example, index) => <option key={index} value={index}>{String((example as { name?: string })?.name ?? `Example ${index + 1}`)}</option>)}</select>}
+      <HistoryButton past={past} current={report} onShow={onShowPast} />
           <MoreButton
             items={[
-              { label: 'Save as example', onClick: onSaveExample },
-              { label: 'Save response to file', onClick: onSaveBody },
+              ...(selectedExample === null ? [{ label: 'Save as example', onClick: onSaveExample }] : []),
+              { label: 'Save response to file', onClick: () => onSaveBody(report) },
               'separator',
-              { label: 'Clear response', onClick: onClear },
+              { label: 'Clear response', onClick: clear },
             ]}
           />
         </div>
@@ -178,14 +190,16 @@ export function ResponseViewer({ report, sending, onCancel, onSaveBody, onSaveEx
             ))}
             {mode === 'pretty' && view?.kind === 'text' && <span className="muted lang-tag">{view.language.toUpperCase()}</span>}
             <span className="spacer" />
+            <span role="status">{feedback}</span>
+            {view?.kind === 'text' && mode !== 'preview' && <button className="btn-icon" aria-label="Search response body" title="Find (Ctrl/Cmd+F)" onClick={() => editor.current && openSearchPanel(editor.current)}><Search size={14} /></button>}
             {view?.kind === 'text' && (
-              <button className="btn-icon" aria-label="Copy response body" title="Copy" onClick={() => void navigator.clipboard.writeText(view.text)}>
+              <button className="btn-icon" aria-label="Copy response body" title="Copy" onClick={() => void navigator.clipboard.writeText(view.text).then(() => setFeedback('Copied')).catch(e => setFeedback(cleanError(e)))}>
                 <Copy size={14} />
               </button>
             )}
           </div>
           {view?.kind === 'text' && view.truncated && <div className="notice">Response is larger than 2 MB; showing the first 2 MB. Use “Save response to file” for the rest.</div>}
-          {mode === 'preview' ? (
+          {isImage && imageUrl && mode === 'pretty' ? <div className="preview-image"><img src={imageUrl} alt="Response preview" /></div> : mode === 'preview' ? (
             isImage && imageUrl ? (
               <div className="preview-image">
                 <img src={imageUrl} alt="Response preview" />
@@ -199,10 +213,10 @@ export function ResponseViewer({ report, sending, onCancel, onSaveBody, onSaveEx
           ) : view?.kind === 'empty' ? (
             <div className="muted-note">This response has no body</div>
           ) : view?.kind === 'binary' ? (
-            <div className="muted-note">Binary response ({formatBytes(view.size)}) — preview is not available. Use “Save response to file”.</div>
+            <div className="muted-note">Binary response ({formatBytes(view.size)}) — {isImage ? 'select Pretty or Preview to view the image.' : 'use “Save response to file” to open it.'}</div>
           ) : view?.kind === 'text' ? (
-            <div className="code-view" data-testid="response-body">
-              <CodeEditor readOnly ariaLabel="Response body" language={mode === 'pretty' ? lang : 'text'} value={mode === 'pretty' ? view.pretty : view.text} />
+            <div className="code-view" data-testid="response-body" tabIndex={0} onKeyDownCapture={e => { if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'f') { e.preventDefault(); if (editor.current) openSearchPanel(editor.current) } }}>
+              <CodeEditor editorRef={editor} readOnly ariaLabel="Response body" language={mode === 'pretty' ? lang : 'text'} value={mode === 'pretty' ? view.pretty : view.text} />
             </div>
           ) : null}
         </div>
@@ -265,12 +279,12 @@ export function ResponseViewer({ report, sending, onCancel, onSaveBody, onSaveEx
           <div className="body-toolbar">
             {(['all', 'passed', 'skipped', 'failed'] as const).map((f) => (
               <button key={f} className={`pill${filter === f ? ' active' : ''}`} onClick={() => setFilter(f)}>
-                {f[0].toUpperCase() + f.slice(1)}
+                {f[0].toUpperCase() + f.slice(1)} ({f === 'all' ? tests.length : f === 'passed' ? passed : f === 'skipped' ? tests.filter(t => t.skipped).length : tests.filter(t => !t.passed && !t.skipped).length})
               </button>
             ))}
           </div>
           {tests.length === 0 ? (
-            <div className="muted-note">There are no tests for this request. Write a test script in the Tests tab.</div>
+            <div className="muted-note">There are no tests for this request. Write a test script in Scripts &gt; After response.</div>
           ) : (
             <ul className="test-list" data-testid="test-results">
               {shownTests.map((t, i) => (
@@ -297,4 +311,11 @@ function hint(code: string | undefined, error: string): string {
   if (code === 'ETIMEDOUT' || code === 'ESOCKETTIMEDOUT') return 'The server did not answer in time. Check the timeout in Settings > General, or the proxy settings.'
   if (/407|proxy/i.test(error)) return 'The proxy requires authentication: set credentials in Settings > Proxy.'
   return ''
+}
+
+function exampleReport(value: unknown): RunReport | undefined {
+  if (!value || typeof value !== 'object') return undefined
+  const example = value as { code?: number; status?: string; body?: string; header?: { key: string; value: string }[] }
+  const body = new TextEncoder().encode(example.body ?? '')
+  return { response: { ok: true, code: example.code ?? 200, status: example.status ?? 'OK', headers: example.header ?? [], body, size: body.length, timeMs: 0 }, tests: [], logs: [], scriptErrors: [], cookies: [] }
 }

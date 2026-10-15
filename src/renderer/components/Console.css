@@ -1,0 +1,4 @@
+.console-modal { width: min(1100px, 95vw); }
+.console-modal .modal-body { padding: 0; }
+.console-modal .console { height: 65vh; width: 100%; }
+.console-request:focus-visible { outline: 2px solid var(--accent-primary, #ff6c37); outline-offset: -2px; }

@@ -1,9 +1,9 @@
 import { mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { beforeEach, describe, expect, it } from 'vitest'
-import { buildRoutes, createDefinition, deleteDefinition, readDefinitions, saveDefinition } from '../../src/main/mocks'
-import { createCollection, createFolder, createRequest, initWorkspace } from '../../src/main/workspace/store'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { buildRoutes, createDefinition, deleteDefinition, readDefinitions, saveDefinition, MockManager, type MockClient } from '../../src/main/mocks'
+import { createCollection, createFolder, createRequest, deleteNode, initWorkspace } from '../../src/main/workspace/store'
 
 let root: string
 beforeEach(async () => {
@@ -33,7 +33,7 @@ describe('mock routes from saved examples', () => {
     ])
     expect(routes[0].response).toEqual({ code: 200, status: 'OK', headers: [{ key: 'Content-Type', value: 'application/json' }], body: '{"id":1}' })
     expect(await buildRoutes(root, f)).toHaveLength(2)
-    expect(await buildRoutes(root, `${col}/Nope`)).toEqual([])
+    await expect(buildRoutes(root, `${col}/Nope`)).rejects.toThrow(/target folder no longer exists/)
   })
 })
 
@@ -48,5 +48,50 @@ describe('mock definitions', () => {
     await expect(saveDefinition(root, 'mocks/../../evil.mock.json', def())).rejects.toThrow(/Not a mock/)
     await deleteDefinition(root, id)
     expect(await readDefinitions(root)).toEqual([])
+  })
+})
+
+
+describe('mock lifecycle regressions', () => {
+  it('forwards CORS and prevents two mocks sharing a port across bind addresses', async () => {
+    const col = await createCollection(root, 'C')
+    const first = await createDefinition(root, def({ target: col, cors: true }))
+    const second = await createDefinition(root, def({ name: 'LAN', target: col, allowLan: true }))
+    const call = vi.fn(async () => ({ url: 'http://127.0.0.1:3000' }))
+    const manager = new MockManager({ call } as unknown as MockClient, () => undefined)
+    expect((await manager.start(root, first)).running).toBe(true)
+    expect(call).toHaveBeenCalledWith('start', expect.objectContaining({ cors: true, host: '127.0.0.1' }))
+    expect(await manager.start(root, second)).toMatchObject({ running: false, error: expect.stringContaining('already in use') })
+    expect(call).toHaveBeenCalledTimes(1)
+    await manager.stop(first)
+    expect((await manager.start(root, second)).running).toBe(true)
+  })
+
+  it('keeps an existing empty folder valid, but stops its mock after that folder is deleted', async () => {
+    const col = await createCollection(root, 'C')
+    const folder = await createFolder(root, col, 'Empty')
+    expect(await buildRoutes(root, folder)).toEqual([])
+    const id = await createDefinition(root, def({ target: folder }))
+    const call = vi.fn(async () => ({ url: 'http://127.0.0.1:3000' }))
+    const manager = new MockManager({ call } as unknown as MockClient, () => undefined)
+    expect((await manager.start(root, id)).running).toBe(true)
+    await deleteNode(root, folder)
+    await manager.refresh(root, col)
+    expect(call).toHaveBeenCalledWith('stop', { id })
+    expect(manager.isRunning(id)).toBe(false)
+    expect((await manager.list(root))[0].status).toMatchObject({ running: false, error: expect.stringContaining('unavailable') })
+  })
+
+  it('stops a running mock and reports a deleted collection during route refresh', async () => {
+    const col = await createCollection(root, 'C')
+    const id = await createDefinition(root, def({ target: col }))
+    const call = vi.fn(async () => ({ url: 'http://127.0.0.1:3000' }))
+    const manager = new MockManager({ call } as unknown as MockClient, () => undefined)
+    await manager.start(root, id)
+    await deleteNode(root, col)
+    await manager.refresh(root, col)
+    expect(call).toHaveBeenCalledWith('stop', { id })
+    expect(manager.isRunning(id)).toBe(false)
+    expect((await manager.list(root))[0].status).toMatchObject({ running: false, error: expect.stringContaining('unavailable') })
   })
 })

@@ -24,6 +24,7 @@ export function startRunner(spec: RunnerSpec, onItem: (r: RunnerItemResult) => v
   const started = Date.now()
   const summary = { iterations: 0, durationMs: 0, requests: 0, testsPassed: 0, testsFailed: 0, errors: 0, avgResponseMs: 0, stopped: false }
   let totalTime = 0
+  let responses = 0
   let current: RunnerItemResult | undefined
   let run: { abort(): void } | undefined
   let stopped = false
@@ -33,7 +34,7 @@ export function startRunner(spec: RunnerSpec, onItem: (r: RunnerItemResult) => v
     if (settled) return
     settled = true
     summary.durationMs = Date.now() - started
-    summary.avgResponseMs = summary.requests ? Math.round(totalTime / summary.requests) : 0
+    summary.avgResponseMs = responses ? Math.round(totalTime / responses) : 0
     summary.stopped = stopped
     saveJar(spec.cookieFile)
     resolve({
@@ -55,7 +56,6 @@ export function startRunner(spec: RunnerSpec, onItem: (r: RunnerItemResult) => v
     iterationCount: spec.iterationCount,
     ...(spec.data.length ? { data: spec.data } : {}),
     ...(spec.delayMs > 0 ? { delay: { item: spec.delayMs } } : {}),
-    ...(spec.stopOnError ? { stopOnError: true } : {}),
   }
 
   new runtime.Runner().run(new Collection(spec.collection), options, (err, r) => {
@@ -66,9 +66,6 @@ export function startRunner(spec: RunnerSpec, onItem: (r: RunnerItemResult) => v
     if (stopped) return finish()
     run = r
     r.start({
-      beforeIteration(_e: unknown, cursor: { iteration: number }) {
-        summary.iterations = Math.max(summary.iterations, cursor.iteration + 1)
-      },
       beforeItem(_e: unknown, cursor: { iteration: number }, item: any) {
         current = { iteration: cursor.iteration, requestId: String(item.id ?? ''), name: item.name, method: '', url: '', tests: [], scriptErrors: [], logs: [] }
       },
@@ -103,15 +100,23 @@ export function startRunner(spec: RunnerSpec, onItem: (r: RunnerItemResult) => v
         if (!r.ok) return
         Object.assign(current, { code: r.code, status: r.status, timeMs: r.timeMs, size: r.size })
         totalTime += r.timeMs
+        responses++
         if (spec.persistResponses)
           current.response = { headers: r.headers, body: Buffer.from(r.body.subarray(0, MAX_PERSISTED_BODY)).toString('utf8') }
       },
       item(_e: unknown, _c: unknown, _item: unknown, _visualizer: unknown, res: { isSkipped?: boolean } | undefined) {
         if (!current || res?.isSkipped) return
         summary.requests++
-        if (current.error) summary.errors++
+        summary.iterations = Math.max(summary.iterations, current.iteration + 1)
+        const hasError = !!current.error || current.scriptErrors.length > 0
+        if (hasError) summary.errors++
         onItem(current)
         current = undefined
+        if (spec.stopOnError && hasError) {
+          stopped = true
+          run?.abort()
+          finish()
+        }
       },
       done() {
         finish()

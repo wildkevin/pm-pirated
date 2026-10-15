@@ -159,7 +159,11 @@ export class Variables {
     const previous = sf.vars(doc)
 
     const seen = new Set<string>()
-    const unique = rows.filter((r) => r.key && !seen.has(r.key) && seen.add(r.key))
+    const unique = rows.filter((r) => r.key)
+    for (const r of unique) {
+      if (seen.has(r.key)) throw new WorkspaceError(`Duplicate variable name "${r.key}". Rename or remove the duplicate before saving.`)
+      seen.add(r.key)
+    }
     sf.setVars(
       doc,
       unique.map((r) => {

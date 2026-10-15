@@ -82,6 +82,7 @@ export const ARGS = {
   refreshWorkspace: z.tuple([]),
   openRecentWorkspace: z.tuple([z.string().max(4096)]),
   defaultWorkspaceLocation: z.tuple([]),
+  previewWorkspacePath: z.tuple([z.string().max(4096), name]),
   pickFolder: z.tuple([z.enum(['location', 'existing'])]),
   createWorkspace: z.tuple([
     z.discriminatedUnion('setup', [
@@ -160,8 +161,8 @@ export const ARGS = {
       profile: z.object({
         kind: z.enum(['fixed', 'ramp-up', 'spike', 'peak']),
         vus: z.number().int().min(1).max(500),
-        durationSec: z.number().int().min(1).max(24 * 3600),
-        rampUpSec: z.number().int().min(1).max(24 * 3600).optional(),
+        durationSec: z.number().int().min(1).max(3600),
+        rampUpSec: z.number().int().min(1).max(3600).optional(),
         baseShare: z.number().min(0).max(1).optional(),
       }),
       dataFile: z.string().max(4000).nullable(),

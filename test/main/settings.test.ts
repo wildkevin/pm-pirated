@@ -132,3 +132,36 @@ describe('network config', () => {
     expect((await readFile(out!, 'utf8')).match(/BEGIN CERTIFICATE/g)!.length).toBeGreaterThan(5)
   })
 })
+
+describe('settings remediation regressions', () => {
+  it('ignores environment proxies when the parent system proxy switch is off', () => {
+    const settings = structuredClone(DEFAULT_SETTINGS)
+    settings.proxy.respectEnvVars = true
+    expect(engineOptions(settings, undefined).respectProxyEnv).toBe(true)
+    settings.proxy.useSystemProxy = false
+    expect(engineOptions(settings, undefined).respectProxyEnv).toBe(false)
+  })
+  it('normalizes pasted client certificate origins and rejects malformed hosts', () => {
+    const settings = structuredClone(DEFAULT_SETTINGS)
+    settings.certificates.client = [
+      { host: 'https://localhost:8443/', cert: '/client.pem' },
+      { host: 'localhost:70000', cert: '/wrong.pem' },
+      { host: 'localhost/path', cert: '/wrong.pem' },
+      { host: 'https://localhost:443', cert: '/client443.pem' },
+    ]
+    expect(engineOptions(settings, undefined).clientCerts).toEqual([
+      { host: 'localhost:8443', cert: '/client.pem' },
+      { host: 'localhost:443', cert: '/client443.pem' },
+    ])
+  })
+})
+
+it('keeps an untouched certificate editor draft out of persisted settings', async () => {
+  const file = join(await tmp(), 's.json')
+  const settings = new AppSettings(file, fakeCrypt)
+  const next = settings.get()
+  next.certificates.client = [{ host: '' }, { host: 'api.test', cert: '/client.pem' }]
+  await settings.save(next)
+  expect(JSON.parse(await readFile(file, 'utf8')).certificates.client).toEqual([{ host: 'api.test', cert: '/client.pem' }])
+  expect(settings.get().certificates.client).toHaveLength(2)
+})

@@ -1,3 +1,4 @@
+import type { MockDefinition } from '../shared/mock'
 import type { RunReport } from '../shared/engine'
 import { stableStringify } from '../shared/format/stableJson'
 import type { PmContainer, PmItem, PmRequest, WorkspaceInfo } from '../shared/format/types'
@@ -12,7 +13,7 @@ export type TabDoc =
   /** Collection Runner (single tab, id 'runner'). */
   | { kind: 'runner'; target: string }
   /** Mock server (id = mocks/<file>.mock.json). */
-  | { kind: 'mock'; title: string }
+  | { kind: 'mock'; title: string; draft?: MockDefinition }
   /** Capture proxy (single tab, id 'capture'). */
   | { kind: 'capture' }
   /** Performance (load) test (single tab, id 'load'). */
@@ -76,6 +77,7 @@ export type Action =
   // Patches for collection/folder and variables tabs (never whole docs from a possibly stale render).
   | { type: 'patchContainer'; key: string; patch: Partial<PmContainer> }
   | { type: 'setContainerVariables'; key: string; variables: VariableRow[] }
+  | { type: 'setMockDraft'; key: string; draft: MockDefinition }
   | { type: 'setRows'; key: string; rows: VariableRow[] }
   /** Replace a doc with freshly loaded data (not for user edits). */
   | { type: 'setDoc'; key: string; doc: TabDoc }
@@ -212,6 +214,8 @@ export function reducer(s: State, a: Action): State {
       )
     case 'setContainerVariables':
       return mapTab(s, (t) => t.key === a.key && t.doc.kind === 'container', (t) => ({ ...pinned(t), doc: { ...(t.doc as Extract<TabDoc, { kind: 'container' }>), variables: a.variables } }))
+    case 'setMockDraft':
+      return mapTab(s, (t) => t.key === a.key && t.doc.kind === 'mock', (t) => ({ ...t, doc: { ...(t.doc as Extract<TabDoc, { kind: 'mock' }>), draft: a.draft } }))
     case 'setRows':
       return mapTab(s, (t) => t.key === a.key && t.doc.kind === 'variables', (t) => ({ ...pinned(t), doc: { ...(t.doc as Extract<TabDoc, { kind: 'variables' }>), rows: a.rows } }))
     case 'setDoc':

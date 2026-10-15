@@ -28,7 +28,10 @@ export async function buildRunCollection(root: string, target: string, requestId
   const selected = new Set(requestIds.filter((id) => id === target || id.startsWith(`${target}/`)))
   const item = prune(doc.item, selected)
   if (!item.length) throw new WorkspaceError('Select at least one request to run')
-  return { ...doc, item }
+  const runtimeItems = (items: Json[]): Json[] => items.map((entry) => Array.isArray(entry.item)
+    ? { ...entry, item: runtimeItems(entry.item) }
+    : { ...entry, protocolProfileBehavior: { ...entry.protocolProfileBehavior, disableBodyPruning: entry.protocolProfileBehavior?.disableBodyPruning ?? true } })
+  return { ...doc, item: runtimeItems(item) }
 }
 
 /** CSV (first row = variable names) or a JSON array of objects, like Postman's data files. */
@@ -43,10 +46,13 @@ export async function readDataFile(path: string): Promise<Record<string, unknown
     }
     if (!Array.isArray(data) || !data.every((r) => r && typeof r === 'object' && !Array.isArray(r)))
       throw new WorkspaceError('A JSON data file must be an array of objects, one per iteration')
+    if (!data.length) throw new WorkspaceError('The data file has no rows. Add at least one data row before running.')
     return data as Record<string, unknown>[]
   }
   try {
-    return parseCsv(text, { columns: true, skip_empty_lines: true, bom: true, relax_column_count: true }) as Record<string, unknown>[]
+    const rows = parseCsv(text, { columns: true, skip_empty_lines: true, bom: true, relax_column_count: true }) as Record<string, unknown>[]
+    if (!rows.length) throw new WorkspaceError('The data file has no rows. Add at least one data row before running.')
+    return rows
   } catch (e) {
     throw new WorkspaceError(`The data file is not valid CSV: ${(e as Error).message}`)
   }

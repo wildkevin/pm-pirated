@@ -106,6 +106,30 @@ describe('collection runner', () => {
     expect(summary.errors).toBe(1)
   })
 
+  it('stops the entire run at the first network error and averages successful responses only', async () => {
+    const s = await spec({ iterationCount: 5, stopOnError: true })
+    ;(s.collection.item as any[])[1].request.url = 'http://127.0.0.1:1/down'
+    const items: RunnerItemResult[] = []
+    const { summary } = await startRunner(s, (item) => items.push(item)).result
+    expect(items.map((item) => item.iteration)).toEqual([0, 0])
+    expect(summary).toMatchObject({ stopped: true, iterations: 1, requests: 2, errors: 1 })
+    expect(summary.avgResponseMs).toBe(Math.round(items[0].timeMs!))
+  })
+
+  it('does not count an iteration whose first request was interrupted', async () => {
+    const s = await spec({ iterationCount: 5 })
+    s.collection.item = [{ name: 'Slow', request: { method: 'GET', url: `${base}/slow` } }]
+    const items: RunnerItemResult[] = []
+    let handle: ReturnType<typeof startRunner>
+    handle = startRunner(s, (item) => {
+      items.push(item)
+      if (items.length === 1) setTimeout(() => handle.stop(), 50)
+    })
+    const { summary } = await handle.result
+    expect(items).toHaveLength(1)
+    expect(summary).toMatchObject({ stopped: true, iterations: 1, requests: 1 })
+  })
+
   it('can be stopped mid-run', async () => {
     const s = await spec({ iterationCount: 50 })
     ;(s.collection.item as any[])[1].request.url = `${base}/slow`

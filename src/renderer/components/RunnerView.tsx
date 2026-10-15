@@ -1,3 +1,5 @@
+import './operational.css'
+import { NumberField } from './common/NumberField'
 import { ChevronDown, ChevronRight, Play, Square, Trash2 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { RunnerItemResult, RunnerSummary } from '../../shared/engine'
@@ -44,7 +46,7 @@ function requestsUnder(node: TreeNode | undefined, prefix: string[] = []): { id:
 
 export function RunnerView({ workspace, target, onTarget, activeEnvironment, onError }: Props) {
   const node = findNode(workspace.collections, target)
-  const requests = useMemo(() => requestsUnder(node), [node])
+  const requests = useMemo(() => (node?.children ?? []).flatMap((child) => requestsUnder(child)), [node])
   const [selected, setSelected] = useState<Set<string>>(() => new Set(requests.map((r) => r.id)))
   const [iterations, setIterations] = useState(1)
   const [delayMs, setDelayMs] = useState(0)
@@ -104,8 +106,10 @@ export function RunnerView({ workspace, target, onTarget, activeEnvironment, onE
       const id = await window.api.startRun(config)
       runIdRef.current = id
       setRunId(id)
+      setRecord((r) => r ? { ...r, id } : r)
     } catch (e) {
       setRunning(false)
+      setRecord(null)
       onError(e)
     }
   }
@@ -181,13 +185,13 @@ export function RunnerView({ workspace, target, onTarget, activeEnvironment, onE
           <label className="field-label" htmlFor="run-iterations">
             Iterations
           </label>
-          <input id="run-iterations" className="input small" type="number" min={1} value={iterations} onChange={(e) => setIterations(Math.max(1, Number(e.target.value) || 1))} />
+          <NumberField id="run-iterations" min={1} max={1000000} value={iterations} onChange={setIterations} />
         </div>
         <div className="form-row">
           <label className="field-label" htmlFor="run-delay">
             Delay (ms)
           </label>
-          <input id="run-delay" className="input small" type="number" min={0} value={delayMs} onChange={(e) => setDelayMs(Math.max(0, Number(e.target.value) || 0))} />
+          <NumberField id="run-delay" min={0} max={3600000} value={delayMs} onChange={setDelayMs} />
         </div>
         <div className="form-row">
           <span className="field-label">Data</span>
@@ -314,6 +318,7 @@ function RunSummaryBar({ record, running, onExport }: { record: RunRecord; runni
   const results = record.results
   const passed = s?.testsPassed ?? results.reduce((n, r) => n + r.tests.filter((t) => t.passed && !t.skipped).length, 0)
   const failed = s?.testsFailed ?? results.reduce((n, r) => n + r.tests.filter((t) => !t.passed && !t.skipped).length, 0)
+  const errors = s?.errors ?? results.filter((r) => r.error || r.scriptErrors.length).length
   return (
     <div className="run-summary">
       <div className="run-title">
@@ -337,6 +342,9 @@ function RunSummaryBar({ record, running, onExport }: { record: RunRecord; runni
           Failed <b data-testid="run-failed">{failed}</b>
         </span>
         <span>
+          Request errors <b className={errors ? 'status-bad' : undefined}>{errors}</b>
+        </span>
+        <span>
           Avg. Resp. Time <b>{s ? `${s.avgResponseMs} ms` : '…'}</b>
         </span>
         <span className="spacer" />
@@ -358,7 +366,7 @@ function ResultRow({ r, showIteration, open, onToggle }: { r: RunnerItemResult; 
         {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
         <span className={methodClass(r.method || 'GET')}>{r.method}</span>
         <span className="run-name">{r.name}</span>
-        <span className="run-url muted">{r.url}</span>
+        <span className="run-url muted" title={r.url}>{r.url}</span>
         <span className="spacer" />
         {r.error ? (
           <span className="status-bad">{r.error}</span>

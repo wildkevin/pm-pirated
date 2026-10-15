@@ -93,6 +93,17 @@ describe('capture proxy', () => {
     expect(captured[0].responseBody).toContain('"url":"/items?q=1"')
   })
 
+  it('preserves literal braces in direct and chained request paths', async () => {
+    const upstream = await proxy(false)
+    const chained = await proxy(false, { host: '127.0.0.1', port: upstream.p.port })
+    for (const current of [upstream, chained]) {
+      const path = '/literal/{{token}}?q={{key}}'
+      const response = await viaProxy(current.p.port, httpBase + path)
+      expect(JSON.parse(response.body).url).toBe(path)
+      expect(current.captured.at(-1)?.url).toBe(httpBase + path)
+    }
+  })
+
   it('tunnels HTTPS untouched when decryption is off (only the host is recorded)', async () => {
     const { p, captured } = await proxy(false)
     const r = await httpsViaProxy(p.port, '/t', serverCa.cert) // client sees the real server certificate

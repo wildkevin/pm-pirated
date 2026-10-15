@@ -7,6 +7,8 @@ export interface PmKeyValue {
   value: string
   disabled?: boolean
   description?: string
+  /** Query-only: distinguish `flag` from `empty=`. */
+  hasEquals?: boolean
 }
 /** Kept for M1 call sites. */
 export type PmHeader = PmKeyValue

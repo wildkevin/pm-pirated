@@ -4,6 +4,7 @@ export interface Series {
   color: string
   values: number[]
   unit?: string
+  legendValue?: number
 }
 
 export function LineChart({ series, height = 140, ariaLabel }: { series: Series[]; height?: number; ariaLabel: string }) {
@@ -30,7 +31,7 @@ export function LineChart({ series, height = 140, ariaLabel }: { series: Series[
             {s.values.length > 0 && (
               <b>
                 {' '}
-                {s.values[s.values.length - 1]}
+                {s.legendValue ?? s.values[s.values.length - 1]}
                 {s.unit ?? ''}
               </b>
             )}

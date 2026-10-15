@@ -1,0 +1,19 @@
+.menu .menu-item:focus-visible { outline: 2px solid var(--accent, #ff6c37); outline-offset: -2px; background: var(--bg-hover); }
+.modal.settings-modal { height: min(680px, 84vh); }
+.settings-modal > .modal-body { padding-top: 0; display: flex; flex-direction: column; overflow: hidden; min-height: 0; }
+.settings-modal .settings-tabs { flex: none; position: sticky; top: 0; padding-top: 8px; background: var(--bg-primary); }
+.settings-modal .settings-tabs button { border-radius: 0; border-bottom: 2px solid transparent; }
+.settings-modal .settings-tabs button[aria-selected="true"] { background: transparent; border-bottom-color: var(--accent, #ff6c37); }
+.settings-modal .settings-body { overflow: auto; min-height: 0; padding-right: 4px; padding-bottom: 16px; }
+.settings-modal .settings-general { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); column-gap: 36px; align-content: start; }
+.settings-modal .settings-general > .section-title { grid-column: 1 / -1; }
+.settings-modal .setting-row { min-width: 0; gap: 16px; }
+.settings-section-heading { display: flex; align-items: center; justify-content: space-between; }
+.settings-section-heading .link-btn { font-size: var(--text-m); font-weight: 400; }
+.settings-modal .file-pick { min-width: 0; overflow-wrap: anywhere; }
+.settings-modal .check:has(input:disabled) { opacity: .55; }
+.input[aria-invalid="true"] { border-color: var(--danger, #c33); }
+.cookie-chips .cookie-chip { padding: 0 4px 0 0; gap: 0; }
+.cookie-chip .cookie-edit { border: 0; background: transparent; color: inherit; cursor: pointer; min-width: 90px; padding: 8px 14px; text-align: left; border-radius: 12px; }
+.cookie-chip > .btn-icon { border-left: 1px solid var(--border-strong); border-radius: 0 12px 12px 0; }
+@media (max-width: 720px) { .settings-modal .settings-general { display: flex; } }

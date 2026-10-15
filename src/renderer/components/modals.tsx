@@ -3,9 +3,9 @@ import { useEffect, useState } from 'react'
 import type { ClientCert, CookieInfo } from '../../shared/engine'
 import type { TreeNode, WorkspaceInfo } from '../../shared/format/types'
 import type { ImportResult } from '../../shared/ipc'
-import type { AppSettingsData } from '../../shared/settings'
+import { normalizeCertificateHost, type AppSettingsData } from '../../shared/settings'
 import { cleanError } from '../lib/body'
-import { Modal, Toggle } from './common/ui'
+import { Modal, NumericInput, Toggle } from './common/ui'
 
 // ---------------- Import ----------------
 
@@ -196,8 +196,8 @@ export function CookiesModal({ onClose }: { onClose(): void }) {
             <>
               <div className="cookie-chips">
                 {shown.map((c) => (
-                  <span key={`${c.path}${c.key}`} className="cookie-chip" onClick={() => setEditor(`${c.key}=${c.value}; Path=${c.path}; Domain=${c.domain};${c.expires ? ` Expires=${c.expires};` : ''}${c.httpOnly ? ' HttpOnly;' : ''}${c.secure ? ' Secure;' : ''}`)}>
-                    {c.key}
+                  <span key={`${c.path}${c.key}`} className="cookie-chip">
+                    <button className="cookie-edit" aria-label={`Edit cookie ${c.key}`} onClick={() => setEditor(`${c.key}=${c.value}; Path=${c.path}; Domain=${c.domain};${c.expires ? ` Expires=${c.expires};` : ''}${c.httpOnly ? ' HttpOnly;' : ''}${c.secure ? ' Secure;' : ''}`)}>{c.key}</button>
                     <button className="btn-icon" aria-label={`Delete cookie ${c.key}`} onClick={(e) => (e.stopPropagation(), void act(() => window.api.deleteCookies(c.domain, c.path, c.key)))}>
                       ×
                     </button>
@@ -271,15 +271,20 @@ export function SettingsModal({ onClose, onSaved }: { onClose(): void; onSaved(s
   const pick = async (title: string) => window.api.pickFile(title)
 
   return (
-    <Modal title="SETTINGS" onClose={onClose} wide>
-      <div className="subtabs" role="tablist">
+    <Modal title="SETTINGS" onClose={onClose} wide className="settings-modal">
+      <div className="subtabs settings-tabs" role="tablist" aria-label="Settings">
         {(['general', 'certificates', 'proxy'] as const).map((t) => (
-          <button key={t} role="tab" aria-selected={tab === t} onClick={() => setTab(t)}>
+          <button key={t} role="tab" tabIndex={tab === t ? 0 : -1} aria-selected={tab === t} onClick={() => setTab(t)} onKeyDown={(e) => {
+            const tabs = ['general', 'certificates', 'proxy'] as const
+            const index = tabs.indexOf(t)
+            const next = e.key === 'ArrowRight' ? (index + 1) % 3 : e.key === 'ArrowLeft' ? (index + 2) % 3 : e.key === 'Home' ? 0 : e.key === 'End' ? 2 : -1
+            if (next >= 0) { e.preventDefault(); setTab(tabs[next]); (e.currentTarget.parentElement!.children[next] as HTMLElement).focus() }
+          }}>
             {t[0].toUpperCase() + t.slice(1)}
           </button>
         ))}
       </div>
-      <div className="settings-body">
+      <div className={`settings-body settings-${tab}`} role="tabpanel">
         {tab === 'general' && (
           <>
             <div className="section-title">Request</div>
@@ -299,18 +304,19 @@ export function SettingsModal({ onClose, onSaved }: { onClose(): void; onSaved(s
         {tab === 'proxy' && (
           <>
             <div className="section-title">Default Proxy Configuration</div>
-            <p className="muted">Requests use the system proxy settings (including PAC scripts) by default.</p>
-            <label className="check">
-              <input type="checkbox" checked={px.useSystemProxy} onChange={(e) => setP({ useSystemProxy: e.target.checked })} /> Use the system proxy
-            </label>
-            <label className="check indent">
-              <input type="checkbox" checked={px.respectEnvVars} onChange={(e) => setP({ respectEnvVars: e.target.checked })} /> Respect HTTP_PROXY, HTTPS_PROXY, and NO_PROXY environment variables.
-            </label>
             <label className="check">
               <input type="checkbox" checked={px.auth.enabled} onChange={(e) => setP({ auth: { ...px.auth, enabled: e.target.checked } })} /> This proxy requires authentication
             </label>
             {px.auth.enabled && <Credentials value={px.auth} onChange={(auth) => setP({ auth })} />}
             <div className="section-title">Proxy configurations for sending requests</div>
+            <p className="muted">Requests use the system proxy settings (including PAC scripts) by default.</p>
+            <label className="check">
+              <input type="checkbox" checked={px.useSystemProxy} onChange={(e) => setP({ useSystemProxy: e.target.checked })} /> Use the system proxy
+            </label>
+            <label className="check indent">
+              <input type="checkbox" disabled={!px.useSystemProxy} checked={px.respectEnvVars} onChange={(e) => setP({ respectEnvVars: e.target.checked })} /> Respect HTTP_PROXY, HTTPS_PROXY, and NO_PROXY environment variables.
+            </label>
+
             <label className="check">
               <input type="checkbox" checked={px.custom.enabled} onChange={(e) => setP({ custom: { ...px.custom, enabled: e.target.checked } })} /> Add a custom proxy configuration
             </label>
@@ -328,7 +334,7 @@ export function SettingsModal({ onClose, onSaved }: { onClose(): void; onSaved(s
                 <div className="form-row">
                   <span className="field-label">Proxy Server</span>
                   <input className="input" aria-label="Proxy host" placeholder="proxy.example.com" value={px.custom.host} onChange={(e) => setP({ custom: { ...px.custom, host: e.target.value } })} />
-                  <input className="input port" aria-label="Proxy port" type="number" value={px.custom.port} onChange={(e) => setP({ custom: { ...px.custom, port: Number(e.target.value) || 8080 } })} />
+                  <NumericInput className="input port" aria-label="Proxy port" min={1} max={65535} value={px.custom.port} onChange={(port) => setP({ custom: { ...px.custom, port } })} />
                 </div>
                 <label className="check">
                   <input type="checkbox" checked={px.custom.auth.enabled} onChange={(e) => setP({ custom: { ...px.custom, auth: { ...px.custom.auth, enabled: e.target.checked } } })} /> Proxy Auth
@@ -347,7 +353,7 @@ export function SettingsModal({ onClose, onSaved }: { onClose(): void; onSaved(s
             <div className="section-title">CA Certificates</div>
             <SettingToggle
               label="Trust the operating system's certificates"
-              help="Uses the Windows certificate store, so corporate root certificates work like in your browser."
+              help="Uses the operating system’s trusted certificate store, so corporate root certificates work like in your browser."
               value={cert.useSystemStore}
               onChange={(v) => setC({ useSystemStore: v })}
             />
@@ -358,9 +364,12 @@ export function SettingsModal({ onClose, onSaved }: { onClose(): void; onSaved(s
                 <button className="file-pick" onClick={async () => { const f = await pick('Select CA certificate (PEM)'); if (f) setC({ ca: { ...cert.ca, file: f } }) }}>
                   {cert.ca.file || 'Select File'}
                 </button>
+                {cert.ca.file && <button className="btn-icon" aria-label="Clear CA file" onClick={() => setC({ ca: { ...cert.ca, file: '' } })}>×</button>}
               </div>
             )}
-            <div className="section-title">Client Certificates</div>
+            <div className="section-title settings-section-heading">Client Certificates
+              <button className="link-btn" onClick={() => setC({ client: [...cert.client, { host: '' }] })}>Add Certificate</button>
+            </div>
             <p className="muted">Add and manage SSL certificates on a per domain basis.</p>
             {cert.client.map((c, i) => (
               <ClientCertRow
@@ -371,9 +380,6 @@ export function SettingsModal({ onClose, onSaved }: { onClose(): void; onSaved(s
                 onRemove={() => setC({ client: cert.client.filter((_, j) => j !== i) })}
               />
             ))}
-            <button className="btn btn-secondary" onClick={() => setC({ client: [...cert.client, { host: '' }] })}>
-              Add Certificate
-            </button>
           </>
         )}
       </div>
@@ -405,7 +411,7 @@ function SettingNumber({ label, help, value, onChange }: { label: string; help: 
         <div className="setting-label">{label}</div>
         <div className="muted">{help}</div>
       </div>
-      <input aria-label={label} className="input setting-number" type="number" min={0} value={value} onChange={(e) => onChange(Math.max(0, Number(e.target.value) || 0))} />
+      <NumericInput aria-label={label} className="input setting-number" min={0} value={value} onChange={onChange} />
     </div>
   )
 }
@@ -426,17 +432,19 @@ function ClientCertRow({ cert, pick, onChange, onRemove }: { cert: ClientCert; p
       <button className="file-pick" onClick={async () => { const f = await pick(`Select ${label}`); if (f) onChange({ ...cert, [key]: f }) }}>
         {cert[key] || 'Select File'}
       </button>
+      {cert[key] && <button className="btn-icon" aria-label={`Clear ${label}`} onClick={() => onChange({ ...cert, [key]: undefined })}>×</button>}
     </div>
   )
   return (
     <div className="client-cert">
       <div className="form-row">
         <span className="field-label">Host</span>
-        <input className="input" aria-label="Certificate host" placeholder="api.example.com:443" value={cert.host} onChange={(e) => onChange({ ...cert, host: e.target.value })} />
+        <input className="input" aria-label="Certificate host" placeholder="api.example.com:443" value={cert.host} onChange={(e) => onChange({ ...cert, host: e.target.value.replace(/^https?:\/\//i, '') })} />
         <button className="btn-icon" aria-label="Remove certificate" onClick={onRemove}>
           <Trash2 size={14} />
         </button>
       </div>
+      {cert.host && !normalizeCertificateHost(cert.host) && <div className="form-error" role="alert">Enter a hostname and optional port (1–65535), without a path.</div>}
       {file('cert', 'CRT file')}
       {file('key', 'KEY file')}
       {file('pfx', 'PFX file')}

@@ -4,7 +4,7 @@ import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
-import { listCookies, resetJars } from '../../src/engine/cookies'
+import { listCookies, resetJars, setCookie } from '../../src/engine/cookies'
 import { buildCollection, ensureProtocol, startSend } from '../../src/engine/send'
 import type { EngineOptions, SendSpec } from '../../src/shared/engine'
 import type { PmContainer, PmItem } from '../../src/shared/format/types'
@@ -284,4 +284,66 @@ describe('helpers', () => {
     expect(c.item[0].item[0].name).toBe('F2')
     expect(c.item[0].item[0].item[0].name).toBe('t')
   })
+})
+
+
+describe('QA request regressions', () => {
+  it.each(['this is not js(', 'throw new Error("pre boom")'])('does not send after a failing setup script: %s', async script => {
+    const r = await send(item(`${base}/x`, {}, { event: [{ listen: 'prerequest', script: { exec: [script] } }] }))
+    expect(r.report.response.ok).toBe(false)
+    expect(r.report.sent).toBeUndefined()
+    expect(r.report.timeline?.filter(e => e.kind === 'request')).toHaveLength(0)
+    expect(r.report.scriptErrors).toHaveLength(1)
+  })
+  it('keeps main and script requests separately, in console event order', async () => {
+    const r = await send(item(`${base}/main`, {}, { event: [
+      { listen: 'prerequest', script: { exec: [`console.log('pre'); pm.sendRequest('${base}/pre', () => console.log('pre done'))`] } },
+      { listen: 'test', script: { exec: [`console.log('post'); pm.sendRequest('${base}/side', () => console.log('side done'))`] } },
+    ] }))
+    expect(r.report.sent?.url).toBe(`${base}/main`)
+    expect(echo(r).url).toBe('/main')
+    expect(r.report.timeline?.map(e => e.kind === 'log' ? e.log.args[0] : e.sent.url.replace(base, ''))).toEqual(['pre', '/pre', 'pre done', '/main', 'post', '/side', 'side done'])
+  })
+  it('sends GET bodies by default and accurately reports explicit pruning', async () => {
+    const request = item(`${base}/x`, { body: { mode: 'raw', raw: '{"x":1}', options: { raw: { language: 'json' } } } })
+    expect(echo(await send(request)).body).toBe('{"x":1}')
+    const pruned = await send({ ...request, protocolProfileBehavior: { disableBodyPruning: false } })
+    expect(echo(pruned).body).toBe('')
+    expect(pruned.report.sent?.body).toBeUndefined()
+    expect(pruned.report.timeline?.some(e => e.kind === 'request' && e.sent.body)).toBe(false)
+  })
+  it('rejects malformed GraphQL and inaccessible body files before any network request', async () => {
+    const invalid = await send(item(`${base}/x`, { method: 'POST', body: { mode: 'graphql', graphql: { query: '{ me }', variables: '{"id":' } } }))
+    expect(invalid.report.response.ok).toBe(false)
+    expect(invalid.report.sent).toBeUndefined()
+    const missing = await send(item(`${base}/x`, { method: 'POST', body: { mode: 'file', file: { src: '/outside/missing-file' } } }))
+    expect(missing.report.response).toMatchObject({ ok: false, error: expect.stringContaining('outside the workspace') })
+    expect(missing.report.sent).toBeUndefined()
+  })
+  it('uses the URL encoding setting and preserves flag/empty params on the wire', async () => {
+    const encoded = echo(await send(item(`${base}/x?q=a b|c`)))
+    const raw = echo(await send(item(`${base}/x?q=a%20b|c`, {}, { protocolProfileBehavior: { disableUrlEncoding: true } })))
+    expect(encoded.url).toBe('/x?q=a%20b%7Cc')
+    expect(raw.url).toBe('/x?q=a%20b|c')
+    const query = await import('../../src/shared/format/url')
+    const url = query.setQueryParams(`${base}/x?empty=&flag&off=1`, query.queryParams(`${base}/x?empty=&flag&off=1`).map(p => p.key === 'off' ? { ...p, disabled: true } : p))
+    expect(echo(await send(item(url as never))).url).toBe('/x?empty=&flag')
+  })
+  it('shows Max-Age as persistent expiry in live and serialized cookie views', () => {
+    const file = join(dir, 'cookies.json')
+    setCookie(file, base, 'theme=dark; Max-Age=3600; Path=/')
+    const expiry = listCookies(file)[0].expires
+    expect(expiry).toBeDefined()
+    expect(new Date(expiry!).getTime() - Date.now()).toBeGreaterThan(3_590_000)
+  })
+})
+
+
+it('validates GraphQL variables and file paths after setup scripts resolve them', async () => {
+  await writeFile(join(dir, 'dynamic.txt'), 'dynamic-content')
+  const setup = { event: [{ listen: 'prerequest' as const, script: { exec: ['pm.variables.set("vars", JSON.stringify({id: 42})); pm.variables.set("file", "dynamic.txt")'] } }] }
+  const graphql = await send(item(`${base}/x`, { method: 'POST', body: { mode: 'graphql', graphql: { query: '{ me }', variables: '{{vars}}' } } }, setup))
+  expect(JSON.parse(echo(graphql).body).variables).toEqual({ id: 42 })
+  const binary = await send(item(`${base}/x`, { method: 'POST', body: { mode: 'file', file: { src: '{{file}}' } } }, setup))
+  expect(echo(binary).body).toBe('dynamic-content')
 })

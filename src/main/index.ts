@@ -1,5 +1,5 @@
 /// <reference types="electron-vite/node" />
-import { app, safeStorage, session, utilityProcess } from 'electron'
+import { app, Menu, safeStorage, session, utilityProcess } from 'electron'
 // Copied into out/ by electron-vite, so `npm start` shows our icon instead of Electron's.
 import icon from '../../build/icon.png?asset'
 import { join } from 'node:path'
@@ -16,7 +16,9 @@ import { registerIpc } from './ipc'
 import { systemProxyFor, writeCaBundle } from './netconfig'
 import { SecretStore } from './secrets'
 import { AppSettings } from './settings'
-import { createMainWindow } from './window'
+import { allowRendererPermission, applicationMenuTemplate, createMainWindow, rendererLocation } from './window'
+
+app.setName('PM Local')
 
 // Lets tests (and a future portable mode) keep app data in a chosen folder.
 if (process.env.PM_LOCAL_USER_DATA) app.setPath('userData', process.env.PM_LOCAL_USER_DATA)
@@ -66,7 +68,6 @@ if (!app.requestSingleInstanceLock()) {
   app.quit()
 } else {
   void app.whenReady().then(() => {
-    session.defaultSession.setPermissionRequestHandler((_wc, _perm, cb) => cb(false))
     const userData = app.getPath('userData')
     const crypt = safeStorageCrypt(safeStorage)
     const settings = new AppSettings(join(userData, 'settings.json'), crypt)
@@ -81,7 +82,12 @@ if (!app.requestSingleInstanceLock()) {
       if (zoomLevel !== settings.get().zoomLevel) void settings.save({ ...settings.get(), zoomLevel })
     }
     app.dock?.setIcon(icon)
+    Menu.setApplicationMenu(Menu.buildFromTemplate(applicationMenuTemplate(process.platform, !!process.env.ELECTRON_RENDERER_URL)))
     const win = createMainWindow(saveZoom, icon)
+    // Copy buttons are permitted only in our trusted main renderer.
+    session.defaultSession.setPermissionRequestHandler((wc, permission, callback, details) => {
+      callback(wc === win.webContents && allowRendererPermission(permission, wc.getURL(), details.requestingUrl, rendererLocation()))
+    })
     win.webContents.on('did-finish-load', () => win.webContents.setZoomLevel(settings.get().zoomLevel))
     win.on('close', () => saveZoom(win.webContents.getZoomLevel()))
     const mockClient = new MockClient(forkMocks, (code) => console.error(`Mock server process exited with code ${code}`))

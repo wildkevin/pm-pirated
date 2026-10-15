@@ -1,5 +1,5 @@
 // Keeps the URL text, the Params table (query, including disabled rows) and path variables in sync,
-// the way Postman's URL bar and Params tab do. Text is kept as typed (no encoding/decoding).
+// the way Postman's URL bar and Params tab do. The bar preserves raw text; table rows are decoded.
 import type { PmKeyValue, PmUrl } from './types'
 
 export function rawUrl(url: PmUrl | undefined): string {
@@ -20,14 +20,16 @@ export function parseQuery(raw: string): PmKeyValue[] {
   if (query === null || query === '') return []
   return query.split('&').map((pair) => {
     const eq = pair.indexOf('=')
-    return eq === -1 ? { key: pair, value: '' } : { key: pair.slice(0, eq), value: pair.slice(eq + 1) }
+    const decode = (s: string) => { try { return decodeURIComponent(s) } catch { return s } }
+    return eq === -1 ? { key: decode(pair), value: '', hasEquals: false } : { key: decode(pair.slice(0, eq)), value: decode(pair.slice(eq + 1)), ...(eq === pair.length - 1 ? { hasEquals: true } : {}) }
   })
 }
 
 function formatQuery(params: PmKeyValue[]): string {
+  const encode = (s: string) => encodeURIComponent(s).replace(/%7B%7B(.*?)%7D%7D/g, (_, key: string) => `{{${decodeURIComponent(key)}}}`)
   return params
     .filter((p) => !p.disabled)
-    .map((p) => (p.value === '' ? p.key : `${p.key}=${p.value}`))
+    .map((p) => (p.value === '' && p.hasEquals === false ? encode(p.key) : `${encode(p.key)}=${encode(p.value)}`))
     .join('&')
 }
 
@@ -43,7 +45,7 @@ export function pathVariableNames(raw: string): string[] {
 }
 
 function build(raw: string, query: PmKeyValue[], variable: PmKeyValue[], previous: PmUrl): PmUrl {
-  const keepQuery = query.some((p) => p.disabled)
+  const keepQuery = query.length > 0
   if (!keepQuery && variable.length === 0) return raw
   const { query: _q, variable: _v, raw: _r, ...rest } = typeof previous === 'string' ? { raw: '' } : previous
   return { ...rest, raw, ...(keepQuery ? { query } : {}), ...(variable.length ? { variable } : {}) }
@@ -61,8 +63,8 @@ export function pathVariables(url: PmUrl): PmKeyValue[] {
 
 /** The user edited the URL text: re-derive enabled params, keep disabled ones and known path values. */
 export function setRaw(url: PmUrl, raw: string): PmUrl {
-  const disabled = queryParams(url).filter((p) => p.disabled)
-  const query = [...parseQuery(raw), ...disabled]
+  const query = parseQuery(raw)
+  queryParams(url).forEach((p, i) => { if (p.disabled) query.splice(Math.min(i, query.length), 0, p) })
   const previous = typeof url === 'string' ? [] : (url.variable ?? [])
   const variable = pathVariableNames(raw).map((key) => previous.find((v) => v.key === key) ?? { key, value: '' })
   return build(raw, query, variable, url)

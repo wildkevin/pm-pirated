@@ -2,7 +2,7 @@
 import { readFile } from 'node:fs/promises'
 import { getCACertificates } from 'node:tls'
 import type { EngineOptions, ProxyJson } from '../shared/engine'
-import type { AppSettingsData } from '../shared/settings'
+import { normalizeCertificateHost, type AppSettingsData } from '../shared/settings'
 import { writeFileAtomic } from './workspace/fsAtomic'
 
 /**
@@ -65,7 +65,7 @@ export function engineOptions(settings: AppSettingsData, extraCaFile: string | u
     sendPostmanToken: general.sendPostmanToken,
     allowFilesOutsideWorkingDir: general.allowFilesOutsideWorkingDir,
     useSystemProxy: proxy.useSystemProxy,
-    respectProxyEnv: proxy.respectEnvVars,
+    respectProxyEnv: proxy.useSystemProxy && proxy.respectEnvVars,
     ...(c.enabled && c.host && protocols.length
       ? {
           customProxy: {
@@ -78,6 +78,9 @@ export function engineOptions(settings: AppSettingsData, extraCaFile: string | u
         }
       : {}),
     ...(extraCaFile ? { extraCaFile } : {}),
-    clientCerts: certificates.client.filter((cc) => cc.host && (cc.cert || cc.pfx)),
+    clientCerts: certificates.client.flatMap((cc) => {
+      const host = normalizeCertificateHost(cc.host)
+      return host && (cc.cert || cc.pfx) ? [{ ...cc, host }] : []
+    }),
   }
 }

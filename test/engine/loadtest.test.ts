@@ -11,9 +11,11 @@ import type { EngineOptions, LoadSpec } from '../../src/shared/engine'
 let base: string
 let server: http.Server
 const cookies = new Set<string>()
+const dataRows: string[] = []
 beforeAll(async () => {
   let n = 0
   server = http.createServer((req, res) => {
+    if (req.url?.startsWith('/data/')) dataRows.push(req.url.slice('/data/'.length))
     if (req.headers.cookie) cookies.add(req.headers.cookie)
     else res.setHeader('set-cookie', `vu=${++n}; Path=/`)
     setTimeout(() => res.end(req.url === '/fail' ? (res.statusCode = 500, 'x') : 'ok'), 5)
@@ -72,6 +74,15 @@ describe('load test', () => {
     // every VU has its own cookie jar
     expect(cookies.size).toBeGreaterThanOrEqual(3)
   }, 15_000)
+
+  it('cycles data rows for each virtual user instead of repeating the final row', async () => {
+    dataRows.length = 0
+    const s = await spec({ profile: { kind: 'fixed', vus: 1, durationSec: 1 }, data: [{ user: 'ada' }, { user: 'bob' }] })
+    s.collection.item = [{ id: 'data', name: 'Data', request: { method: 'GET', url: `${base}/data/{{user}}` } }]
+    await startLoadTest(s, () => undefined).result
+    expect(dataRows.length).toBeGreaterThan(6)
+    expect(dataRows.slice(0, 6)).toEqual(['ada', 'bob', 'ada', 'bob', 'ada', 'bob'])
+  }, 10_000)
 
   it('can be stopped early', async () => {
     const handle = startLoadTest(await spec({ profile: { kind: 'fixed', vus: 2, durationSec: 30 } }), () => undefined)

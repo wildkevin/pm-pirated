@@ -1,9 +1,11 @@
+import './operational.css'
+import { NumberField } from './common/NumberField'
 import { Play, Square, Trash2 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { TreeNode, WorkspaceInfo } from '../../shared/format/types'
-import type { LoadInfo, LoadRecord } from '../../shared/ipc'
+import type { DataPreview, LoadInfo, LoadRecord } from '../../shared/ipc'
 import type { LoadSummary, Tick } from '../../loadtest/metrics'
-import { profileSeries, type LoadProfile, type ProfileKind } from '../../loadtest/profile'
+import { MAX_DURATION_SEC, MAX_VUS, profileSeries, type LoadProfile, type ProfileKind } from '../../loadtest/profile'
 import { cleanError } from '../lib/body'
 import { onLoadEvent } from '../lib/runnerBus'
 import { LineChart } from './common/LineChart'
@@ -41,6 +43,7 @@ export function LoadTestView({ workspace, target, onTarget, activeEnvironment, o
   const [profile, setProfile] = useState<LoadProfile>({ kind: 'fixed', vus: 10, durationSec: 30, rampUpSec: 10, baseShare: 0.2 })
   const [environmentId, setEnvironmentId] = useState<string | null>(activeEnvironment)
   const [dataFile, setDataFile] = useState<string | null>(null)
+  const [preview, setPreview] = useState<DataPreview | null>(null)
   const [record, setRecord] = useState<LoadRecord | null>(null)
   const [running, setRunning] = useState(false)
   const [past, setPast] = useState<LoadInfo[]>([])
@@ -72,10 +75,22 @@ export function LoadTestView({ workspace, target, onTarget, activeEnvironment, o
       setRecord({ id: '', name: '', startedAt: Date.now(), profile, environment: null, summary: null, ticks: [] })
       const id = await window.api.startLoadTest({ target, requestIds: ids, environmentId, profile, dataFile })
       runIdRef.current = id
+      setRecord((r) => r ? { ...r, id } : r)
     } catch (e) {
       setRunning(false)
+      setRecord(null)
       onError(cleanError(e))
     }
+  }
+
+  const pickData = async () => {
+    try {
+      const file = await window.api.pickFile('Select data file (CSV or JSON)')
+      if (!file) return
+      const next = await window.api.previewDataFile(file)
+      setDataFile(file)
+      setPreview(next)
+    } catch (e) { onError(cleanError(e)) }
   }
 
   const set = (patch: Partial<LoadProfile>) => setProfile((p) => ({ ...p, ...patch }))
@@ -95,18 +110,18 @@ export function LoadTestView({ workspace, target, onTarget, activeEnvironment, o
             </option>
           ))}
         </select>
-        <div className="muted data-preview-left">{ids.length} requests per iteration</div>
+        <div className="muted data-preview-left">{ids.length} {ids.length === 1 ? 'request' : 'requests'} per iteration</div>
         <div className="form-row">
           <label className="field-label" htmlFor="load-vus">
             Virtual users
           </label>
-          <input id="load-vus" className="input small" type="number" min={1} max={500} value={profile.vus} onChange={(e) => set({ vus: Math.min(500, Math.max(1, Number(e.target.value) || 1)) })} />
+          <NumberField id="load-vus" min={1} max={MAX_VUS} value={profile.vus} onChange={(vus) => set({ vus })} />
         </div>
         <div className="form-row">
           <label className="field-label" htmlFor="load-duration">
             Duration (s)
           </label>
-          <input id="load-duration" className="input small" type="number" min={1} value={profile.durationSec} onChange={(e) => set({ durationSec: Math.max(1, Number(e.target.value) || 1) })} />
+          <NumberField id="load-duration" min={1} max={MAX_DURATION_SEC} value={profile.durationSec} onChange={(durationSec) => set({ durationSec })} />
         </div>
         <div className="field-label">Load profile</div>
         <div className="chips">
@@ -122,7 +137,7 @@ export function LoadTestView({ workspace, target, onTarget, activeEnvironment, o
             <label className="field-label" htmlFor="load-ramp">
               Ramp up (s)
             </label>
-            <input id="load-ramp" className="input small" type="number" min={1} value={profile.rampUpSec ?? 10} onChange={(e) => set({ rampUpSec: Math.max(1, Number(e.target.value) || 1) })} />
+            <NumberField id="load-ramp" min={1} max={profile.durationSec} value={profile.rampUpSec ?? 10} onChange={(rampUpSec) => set({ rampUpSec })} />
           </div>
         )}
         {(profile.kind === 'spike' || profile.kind === 'peak') && (
@@ -133,7 +148,7 @@ export function LoadTestView({ workspace, target, onTarget, activeEnvironment, o
             <input id="load-base" className="input small" type="number" min={0} max={100} value={Math.round((profile.baseShare ?? 0.2) * 100)} onChange={(e) => set({ baseShare: Math.min(1, Math.max(0, (Number(e.target.value) || 0) / 100)) })} />
           </div>
         )}
-        <LineChart ariaLabel="Load profile preview" height={90} series={[{ label: 'Virtual users', color: 'var(--brand)', values: profileSeries(profile) }]} />
+        <LineChart ariaLabel="Load profile preview" height={90} series={[{ label: 'Peak virtual users', legendValue: profile.vus, color: 'var(--brand)', values: profileSeries(profile) }]} />
         <div className="form-row">
           <label className="field-label" htmlFor="load-env">
             Environment
@@ -149,15 +164,16 @@ export function LoadTestView({ workspace, target, onTarget, activeEnvironment, o
         </div>
         <div className="form-row">
           <span className="field-label">Data</span>
-          <button className="file-pick" onClick={async () => setDataFile((await window.api.pickFile('Select data file (CSV or JSON)')) ?? dataFile)}>
+          <button className="file-pick" onClick={() => void pickData()}>
             {dataFile ? dataFile.split(/[\\/]/).pop() : 'Select File'}
           </button>
           {dataFile && (
-            <button className="btn-icon" aria-label="Remove data file" onClick={() => setDataFile(null)}>
+            <button className="btn-icon" aria-label="Remove data file" onClick={() => { setDataFile(null); setPreview(null) }}>
               ×
             </button>
           )}
         </div>
+        {preview && <div className="muted data-preview">{preview.count} rows · columns: {preview.columns.join(', ')}</div>}
         {running ? (
           <button className="btn btn-secondary run-btn" onClick={() => runIdRef.current && void window.api.stopLoadTest(runIdRef.current)}>
             <Square size={12} /> Stop
@@ -174,7 +190,7 @@ export function LoadTestView({ workspace, target, onTarget, activeEnvironment, o
               {past.map((p) => (
                 <div key={p.id} className="past-run" onClick={() => window.api.readLoadTest(p.id).then((r) => ((runIdRef.current = null), setRecord(r)), onError)}>
                   <span className="tree-name">
-                    {p.name} <span className="muted">· {p.profile.vus} VUs · {new Date(p.startedAt).toLocaleString()}</span>
+                    {p.name} <span className="muted">· {PROFILES.find((profile) => profile.kind === p.profile.kind)?.label} · {p.profile.vus} VUs · {p.profile.durationSec}s · {new Date(p.startedAt).toLocaleString()}</span>
                   </span>
                   {p.summary && <span className="muted">{p.summary.avgMs} ms</span>}
                   <button
@@ -261,7 +277,7 @@ function LoadResults({ ticks, summary, running }: { ticks: Tick[]; summary: Load
         { label: 'Errors/s', color: 'var(--error)', values: ticks.map((t) => t.errors) },
       ]} />
       {summary && summary.requests.length > 0 && (
-        <table className="kv kv-readonly load-table">
+        <div className="load-table-scroll"><table className="kv kv-readonly load-table">
           <thead>
             <tr>
               <th>Request</th>
@@ -288,7 +304,7 @@ function LoadResults({ ticks, summary, running }: { ticks: Tick[]; summary: Load
               </tr>
             ))}
           </tbody>
-        </table>
+        </table></div>
       )}
     </>
   )

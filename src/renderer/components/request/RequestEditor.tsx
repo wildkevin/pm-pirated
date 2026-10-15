@@ -34,6 +34,7 @@ export interface RequestEditorProps {
 }
 
 export function RequestEditor(p: RequestEditorProps) {
+  const [customMethod, setCustomMethod] = useState(false)
   const [section, setSection] = useState<Section>('params')
   const [sendMenu, setSendMenu] = useState<DOMRect | null>(null)
   const [saveMenu, setSaveMenu] = useState<DOMRect | null>(null)
@@ -86,11 +87,12 @@ export function RequestEditor(p: RequestEditorProps) {
 
       <div className="url-row">
         <div className="url-group">
-          <select aria-label="HTTP method" className={`method method-select ${methodClass(req.method)}`} value={req.method} onChange={(e) => p.onPatch({ method: e.target.value })}>
+          {customMethod ? <input aria-label="Custom HTTP method" className="input method" value={req.method} autoFocus onChange={e => p.onPatch({ method: e.target.value.toUpperCase().replace(/[^!#$%&'*+.^_`|~0-9A-Z-]/g, '') })} onBlur={() => { if (!req.method) p.onPatch({ method: 'GET' }) }} /> : <select aria-label="HTTP method" className={`method method-select ${methodClass(req.method)}`} value={req.method} onChange={(e) => { if (e.target.value === '__custom') { setCustomMethod(true); p.onPatch({ method: '' }) } else p.onPatch({ method: e.target.value }) }}>
             {(METHODS as readonly string[]).concat(METHODS.includes(req.method as never) ? [] : [req.method]).map((m) => (
               <option key={m}>{m}</option>
             ))}
-          </select>
+            <option value="__custom">Custom…</option>
+          </select>}
           <VarInput
             ariaLabel="Request URL"
             placeholder="Enter URL or paste text"
@@ -176,7 +178,7 @@ export function RequestEditor(p: RequestEditorProps) {
             <KeyValueTable rows={req.header} onChange={(header) => p.onPatch({ header })} />
           </>
         )}
-        {section === 'body' && <BodyEditor body={req.body} onChange={(body) => p.onPatch({ body })} pickFile={p.pickFile} />}
+        {section === 'body' && <><BodyEditor allowFilesOutsideWorkingDir={p.settings?.general.allowFilesOutsideWorkingDir} body={req.body} onChange={(body) => p.onPatch({ body })} pickFile={p.pickFile} />{item.protocolProfileBehavior?.disableBodyPruning === false && /^(GET|HEAD)$/i.test(req.method) && hasBody && <div className="notice">This body will not be sent. Enable “Send body with GET/HEAD” in Settings to include it.</div>}</>}
         {section === 'scripts' && <ScriptsPanel events={item.event} scope="request" onChange={(event) => p.onItemPatch({ event })} />}
         {section === 'settings' && (
           <RequestSettings behavior={item.protocolProfileBehavior} settings={p.settings} onChange={(protocolProfileBehavior) => p.onItemPatch({ protocolProfileBehavior })} />

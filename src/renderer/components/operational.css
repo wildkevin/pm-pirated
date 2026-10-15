@@ -1,0 +1,38 @@
+/* Operational views adapt to the available centre pane, including side panels. */
+.runner, .capture, .mock-body { container-type: inline-size; flex-wrap: wrap; overflow: auto; }
+.runner > .runner-config, .capture > .capture-config { width: 320px; }
+.runner .run-stats { flex-wrap: wrap; gap: 8px 16px; }
+.runner .run-stats > span { white-space: nowrap; }
+.runner .run-row { display: grid; grid-template-columns: 14px 48px minmax(0, 1fr); white-space: normal; }
+.runner .run-row > svg { flex-shrink: 0; }
+.runner .run-row .run-url { grid-column: 2 / -1; overflow-wrap: anywhere; overflow: visible; }
+.runner .run-row > .spacer { display: none; }
+.runner .run-row > .status-bad, .runner .run-row > .muted:last-child { grid-column: 2 / -1; overflow-wrap: anywhere; }
+.runner .run-tests li { flex-wrap: wrap; gap: 6px; }
+.runner .run-tests .test-badge { flex-shrink: 0; }
+.runner .run-tests .test-error { overflow-wrap: anywhere; }
+.loadtest .metric-cards { grid-template-columns: repeat(auto-fit, minmax(135px, 1fr)); }
+.loadtest .metric-value { white-space: nowrap; }
+.load-table-scroll { overflow: auto; flex: none; }
+.loadtest .load-table { table-layout: auto; min-width: 640px; }
+.loadtest .load-table :is(td, th) { white-space: nowrap; word-break: normal; padding: 8px; }
+.loadtest .load-table :is(td, th):first-child { white-space: normal; min-width: 140px; }
+.mock-body .mock-left { min-width: 0; width: 340px; }
+.mock-body .mock-log-row { display: grid; grid-template-columns: auto 48px minmax(60px, 1fr) 36px; white-space: normal; }
+.mock-body .mock-log-path, .mock-body .mock-log-reason { overflow: visible; overflow-wrap: anywhere; }
+.mock-body .mock-log-reason { grid-column: 2 / -1; }
+.capture .capture-row { display: grid; grid-template-columns: 48px minmax(0, 1fr) auto; white-space: normal; }
+.capture .capture-row .capture-host { overflow-wrap: anywhere; }
+.capture .capture-row .capture-path { grid-column: 2 / -1; grid-row: 2; overflow: visible; overflow-wrap: anywhere; }
+.capture .capture-row .spacer { display: none; }
+.capture .capture-row > .status-bad { overflow-wrap: anywhere; }
+.capture .capture-row > .muted:last-child { grid-column: 2 / -1; }
+.capture .capture-actions { flex-wrap: wrap; }
+.capture .capture-details { min-height: 220px; }
+.capture .capture-template-notice { white-space: normal; grid-column: 1 / -1; font-size: var(--text-s); }
+@container (max-width: 760px) {
+  .runner-config, .capture-config { width: 100% !important; max-height: 300px; border-right: 0; border-bottom: 1px solid var(--border); }
+  .runner-results, .capture-results { flex: 1 0 100%; min-height: 380px; }
+  .mock-left { width: 100% !important; max-height: 300px; }
+  .mock-right { flex: 1 0 100%; min-height: 280px; }
+}

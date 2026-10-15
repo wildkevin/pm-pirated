@@ -1,4 +1,4 @@
-import { BrowserWindow, ipcMain, type BrowserWindowConstructorOptions } from 'electron'
+import { BrowserWindow, ipcMain, type BrowserWindowConstructorOptions, type MenuItemConstructorOptions } from 'electron'
 import { BEFORE_CLOSE, CLOSE_READY } from '../shared/ipc'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -24,6 +24,21 @@ export function isTrustedUrl(url: string, loc: RendererLocation): boolean {
   u.hash = ''
   u.search = ''
   return u.href.toLowerCase() === pathToFileURL(loc.file).href.toLowerCase()
+}
+
+/** Clipboard writes are the sole renderer permission, and only for our own page. */
+export function allowRendererPermission(permission: string, pageUrl: string, requestingUrl: string | undefined, loc: RendererLocation): boolean {
+  return permission === 'clipboard-sanitized-write' && isTrustedUrl(pageUrl, loc) && (!requestingUrl || isTrustedUrl(requestingUrl, loc))
+}
+
+/** Leave close-tab accelerators to the renderer; production menus cannot reload away drafts. */
+export function applicationMenuTemplate(platform = process.platform, development = false): MenuItemConstructorOptions[] {
+  return [
+    ...(platform === 'darwin' ? [{ label: 'PM Local', submenu: [{ role: 'about' }, { type: 'separator' }, { role: 'hide' }, { role: 'hideOthers' }, { role: 'unhide' }, { type: 'separator' }, { role: 'quit' }] } as MenuItemConstructorOptions] : [{ label: 'File', submenu: [{ role: 'quit' }] } as MenuItemConstructorOptions]),
+    { label: 'Edit', submenu: [{ role: 'undo' }, { role: 'redo' }, { type: 'separator' }, { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'selectAll' }] },
+    { label: 'View', submenu: [{ role: 'resetZoom' }, { role: 'zoomIn' }, { role: 'zoomOut' }, { type: 'separator' }, { role: 'togglefullscreen' }, ...(development ? [{ type: 'separator' }, { role: 'reload' }, { role: 'toggleDevTools' }] as MenuItemConstructorOptions[] : [])] },
+    { label: 'Window', submenu: [{ role: 'minimize' }, { role: 'zoom' }] },
+  ]
 }
 
 export function mainWindowOptions(preload: string): BrowserWindowConstructorOptions {

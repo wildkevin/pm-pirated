@@ -37,3 +37,10 @@ describe('formatting helpers', () => {
     expect(cleanError('plain')).toBe('plain')
   })
 })
+
+
+it('decodes declared legacy charsets and provides desktop-appropriate errors', () => {
+  expect(viewBody(new Uint8Array([99, 97, 102, 233]), 'text/plain; charset=iso-8859-1')).toMatchObject({ kind: 'text', text: 'café' })
+  expect(cleanError('self signed certificate; if the root CA is installed locally, try running Node.js with --use-system-ca')).toBe('self signed certificate')
+  expect(cleanError('net::ERR_UNSAFE_PORT')).toContain('port is blocked')
+})

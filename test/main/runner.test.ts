@@ -1,6 +1,8 @@
 import { mkdtemp, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { Url } from 'postman-collection'
+import { queryParams, rawUrl, setQueryParams } from '../../src/shared/format/url'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { applyAuth, codeLanguages, generateCode, substitute } from '../../src/main/codegen'
 import { buildRunCollection, deleteRun, listRuns, previewData, prune, readDataFile, readRun, saveRun } from '../../src/main/runner'
@@ -33,6 +35,18 @@ describe('run collection', () => {
     await expect(buildRunCollection(root, col, [])).rejects.toThrow(/Select at least one/)
   })
 
+  it('uses the same GET body default as individual sends and preserves an explicit opt-out', async () => {
+    const col = await createCollection(root, 'Bodies')
+    const make = (name: string, prune?: boolean) => createRequest(root, col, name, {
+      name,
+      request: { method: 'GET', url: 'http://example.test/', header: [], body: { mode: 'raw', raw: 'payload' } },
+      ...(prune === undefined ? {} : { protocolProfileBehavior: { disableBodyPruning: prune } }),
+    })
+    const ids = [await make('Default'), await make('Opt out', false)]
+    const doc = await buildRunCollection(root, col, ids)
+    expect(doc.item.map((item: any) => item.protocolProfileBehavior.disableBodyPruning)).toEqual([true, false])
+  })
+
   it('prune drops empty folders', () => {
     expect(prune([{ name: 'F', item: [{ id: 'x' }] }, { id: 'y' }], new Set(['y']))).toEqual([{ id: 'y' }])
   })
@@ -44,6 +58,12 @@ describe('data files', () => {
     expect(await readDataFile(join(root, 'd.csv'))).toEqual([{ user: 'ada', note: 'hello, world' }, { user: 'bob', note: 'say "hi"' }])
     await writeFile(join(root, 'd.json'), '[{"user":"ada","n":1}]')
     expect(await previewData(join(root, 'd.json'))).toEqual({ rows: [{ user: 'ada', n: 1 }], count: 1, columns: ['user', 'n'] })
+  })
+  it.each([['empty.csv', ''], ['header.csv', 'user\n'], ['empty.json', '[]']])('rejects data files without data rows: %s', async (name, content) => {
+    const file = join(root, name)
+    await writeFile(file, content)
+    await expect(readDataFile(file)).rejects.toThrow(/no rows/)
+    await expect(previewData(file)).rejects.toThrow(/no rows/)
   })
   it('explains bad files', async () => {
     await writeFile(join(root, 'bad.json'), '{"not":"an array"}')
@@ -144,6 +164,18 @@ describe('code snippets', () => {
     expect(code).not.toContain('X-Off')
   })
 
+  it('adds the Content-Type the app sends for raw bodies, unless one is set (QA RES-2)', async () => {
+    const post = (language: 'json' | 'xml', header: { key: string; value: string }[] = []) => ({
+      name: 'p',
+      request: { method: 'POST', url: 'http://h.test/e', header, body: { mode: 'raw' as const, raw: '{"a":1}', options: { raw: { language } } } },
+    })
+    expect(await generateCode(post('json'), undefined, [], 'curl', 'cURL')).toContain("Content-Type: application/json")
+    expect(await generateCode(post('xml'), undefined, [], 'python', 'Requests')).toContain("'Content-Type': 'application/xml'")
+    const own = await generateCode(post('json', [{ key: 'content-type', value: 'application/vnd.x+json' }]), undefined, [], 'curl', 'cURL')
+    expect(own).toContain('application/vnd.x+json')
+    expect(own).not.toContain('application/json')
+  })
+
   it('copes with quotes and backslashes in variable values', async () => {
     const code = await generateCode(item, undefined, [{ key: 'base', value: 'https://api.test' }, { key: 'who', value: 'a"b\\c' }], 'curl', 'cURL')
     expect(code).toContain('{"a":"a"b\\c"}') // inserted as typed, like Postman
@@ -159,4 +191,22 @@ describe('code snippets', () => {
     const r = applyAuth(item, { type: 'apikey', apikey: [{ key: 'key', value: 'k' }, { key: 'value', value: 'v' }, { key: 'in', value: 'query' }] })
     expect(r.request.url).toBe('{{base}}/users?x=1&k=v')
   })
+})
+
+
+it('preserves encoded query values, bare flags, and disabled rows through run collection export', async () => {
+  const col = await createCollection(root, 'Query encoding')
+  const original = 'https://example.test/?q=a%2Bb&delimiters=a%26b%3Dc%20d%23e&empty=&flag&off=a%2Bb'
+  const url = setQueryParams(original, queryParams(original).map(row => row.key === 'off' ? { ...row, disabled: true } : row))
+  const id = await createRequest(root, col, 'R', { name: 'R', request: { method: 'GET', url, header: [] } })
+  const doc = await buildRunCollection(root, col, [id])
+  const exported = doc.item[0].request.url
+  expect(new Url(exported).toString()).toBe(rawUrl(url))
+  expect(exported.query).toEqual([
+    { key: 'q', value: 'a%2Bb' },
+    { key: 'delimiters', value: 'a%26b%3Dc%20d%23e' },
+    { key: 'empty', value: '' },
+    { key: 'flag', value: null },
+    { key: 'off', value: 'a%2Bb', disabled: true },
+  ])
 })

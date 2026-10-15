@@ -1,4 +1,7 @@
 // Load profiles: how many virtual users should be active at time t (Postman's fixed / ramp-up / spike / peak).
+export const MAX_VUS = 500
+export const MAX_DURATION_SEC = 3600
+
 export type ProfileKind = 'fixed' | 'ramp-up' | 'spike' | 'peak'
 
 export interface LoadProfile {
@@ -10,6 +13,11 @@ export interface LoadProfile {
   rampUpSec?: number
   /** spike/peak: the load outside the spike/peak, as a share of `vus` (0–1). */
   baseShare?: number
+}
+
+export function validateLoadProfile(p: LoadProfile): void {
+  if (!Number.isInteger(p.vus) || p.vus < 1 || p.vus > MAX_VUS) throw new Error(`Virtual users must be a whole number from 1 to ${MAX_VUS}`)
+  if (!Number.isInteger(p.durationSec) || p.durationSec < 1 || p.durationSec > MAX_DURATION_SEC) throw new Error(`Duration must be a whole number from 1 to ${MAX_DURATION_SEC} seconds`)
 }
 
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v))
@@ -49,5 +57,6 @@ export function vusAt(p: LoadProfile, t: number): number {
 
 /** One point per second for the preview graph. */
 export function profileSeries(p: LoadProfile): number[] {
-  return Array.from({ length: Math.max(1, Math.ceil(p.durationSec)) }, (_, t) => vusAt(p, t))
+  const count = Math.min(120, Math.max(1, Math.ceil(p.durationSec)))
+  return Array.from({ length: count }, (_, t) => vusAt(p, t * p.durationSec / count))
 }

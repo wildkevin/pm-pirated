@@ -9,10 +9,10 @@ const post = (m: FromMocks) => process.parentPort.postMessage(m)
 type Handlers = { [M in keyof MockMethods]: (p: MockMethods[M]['params']) => Promise<MockMethods[M]['result']> | MockMethods[M]['result'] }
 
 const handlers: Handlers = {
-  async start({ id, host, port, delayMs, routes }) {
+  async start({ id, host, port, delayMs, cors, routes }) {
     await running.get(id)?.close()
     running.delete(id)
-    const mock = await startMockServer({ host, port, delayMs }, routes, (entry) => post({ type: 'log', mockId: id, entry }))
+    const mock = await startMockServer({ host, port, delayMs, cors }, routes, (entry) => post({ type: 'log', mockId: id, entry }))
     running.set(id, mock)
     return { url: mock.url }
   },

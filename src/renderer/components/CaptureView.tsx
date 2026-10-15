@@ -1,3 +1,4 @@
+import './operational.css'
 import { Download, Play, ShieldCheck, ShieldOff, Square, Trash2 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import type { CapturedExchange } from '../../shared/engine'
@@ -46,6 +47,8 @@ export function CaptureView({ state, workspace, captured, onClear, onOpenInTab, 
         patch.destination ?? state.destination,
       ),
     )
+  const hasTemplate = (c: CapturedExchange) => c.requestBody.includes('{{') || c.requestHeaders.some((h) => h.key.includes('{{') || h.value.includes('{{'))
+  const allowTemplate = (c: CapturedExchange) => !hasTemplate(c) || window.confirm('This capture contains {{variable}} expressions in its headers or body. Sending it as a request can replace them with your workspace variables, including secrets, and send them to the captured host. Continue only if you trust this request.')
   const sel = captured.find((c) => c.id === selected)
 
   return (
@@ -175,6 +178,7 @@ export function CaptureView({ state, workspace, captured, onClear, onOpenInTab, 
                 <span className="spacer" />
                 {c.error ? <span className="status-bad">{c.error}</span> : c.status ? <span className={c.status < 400 ? 'status-ok' : 'status-bad'}>{c.status}</span> : null}
                 <span className="muted">{c.timeMs} ms</span>
+                {hasTemplate(c) && <span className="capture-template-notice status-bad">Not saved automatically: headers or body contain variable expressions. Review before opening or saving.</span>}
               </div>
             )
           })}
@@ -184,18 +188,19 @@ export function CaptureView({ state, workspace, captured, onClear, onOpenInTab, 
             <div className="capture-actions">
               <button
                 className="btn btn-small"
-                onClick={() =>
+                onClick={() => {
+                  if (!allowTemplate(sel)) return
                   onOpenInTab({
                     name: `${sel.method} ${new URL(sel.url).pathname}`,
                     request: {
                       method: sel.method,
-                      url: sel.url,
+                      url: sel.url.replace(/\{\{/g, '%7B%7B').replace(/\}\}/g, '%7D%7D'),
                       header: sel.requestHeaders.filter((h) => !/^(host|content-length|connection|proxy-connection|accept-encoding)$/i.test(h.key)),
                       ...(sel.requestBody ? { body: { mode: 'raw' as const, raw: sel.requestBody } } : {}),
                     },
                     response: [],
                   })
-                }
+                }}
               >
                 Open in tab
               </button>
@@ -206,7 +211,7 @@ export function CaptureView({ state, workspace, captured, onClear, onOpenInTab, 
                   </option>
                 ))}
               </select>
-              <button className="btn btn-small" disabled={!saveTarget} onClick={() => call(window.api.saveCaptured(sel, saveTarget))}>
+              <button className="btn btn-small" disabled={!saveTarget} onClick={() => { if (allowTemplate(sel)) call(window.api.saveCaptured(sel, saveTarget)) }}>
                 Save to collection
               </button>
             </div>

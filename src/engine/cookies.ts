@@ -29,12 +29,15 @@ export function saveJar(file: string): void {
 }
 
 function toInfo(c: Record<string, any>): CookieInfo {
+  const age = Number(c.maxAge)
+  const created = new Date(c.creation ?? Date.now()).getTime()
+  const expiry = c.maxAge !== undefined && c.maxAge !== null && Number.isFinite(age) ? new Date(created + age * 1000).toISOString() : c.expires
   return {
     domain: c.domain ?? '',
     path: c.path ?? '/',
     key: c.key ?? '',
     value: c.value ?? '',
-    expires: c.expires && c.expires !== 'Infinity' ? String(c.expires) : undefined,
+    expires: expiry && expiry !== 'Infinity' ? String(expiry) : undefined,
     httpOnly: !!c.httpOnly,
     secure: !!c.secure,
   }

@@ -60,3 +60,14 @@ export const DEFAULT_SETTINGS: AppSettingsData = {
   },
   certificates: { useSystemStore: true, ca: { enabled: false, file: '' }, client: [] },
 }
+
+/** Accept pasted HTTPS origins while rejecting paths, credentials and invalid ports. */
+export function normalizeCertificateHost(input: string): string | null {
+  const host = input.trim().replace(/^https?:\/\//i, '').replace(/\/$/, '')
+  if (!host || /[\s/?#@]/.test(host)) return null
+  try {
+    const url = new URL(`https://${host}`)
+    if (!url.hostname || (url.port && Number(url.port) < 1)) return null
+    return url.hostname + (/:443$/.test(host) ? ':443' : url.port ? `:${url.port}` : '')
+  } catch { return null }
+}

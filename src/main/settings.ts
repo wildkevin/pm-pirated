@@ -67,6 +67,8 @@ export class AppSettings {
   async save(next: AppSettingsData): Promise<void> {
     this.data = merge(DEFAULT_SETTINGS, structuredClone(next))
     const onDisk = structuredClone(this.data)
+    // An untouched Add Certificate row is an editor draft, not a configured certificate.
+    onDisk.certificates.client = onDisk.certificates.client.filter((cert) => cert.host || cert.cert || cert.key || cert.pfx || cert.passphrase)
     SECRET_FIELDS(onDisk, (v) => (v ? this.crypt.encrypt(v) : v))
     const write = async () => {
       await mkdir(dirname(this.file), { recursive: true })

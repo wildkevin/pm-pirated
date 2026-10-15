@@ -1,5 +1,6 @@
+import './operational.css'
 import { Copy, Play, Save, Square } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useId, useState } from 'react'
 import type { TreeNode, WorkspaceInfo } from '../../shared/format/types'
 import type { MockDefinition, MockInfo, MockLogEntry, MockRoute } from '../../shared/mock'
 import { methodClass } from '../lib/methods'
@@ -15,19 +16,21 @@ export function containerOptions(nodes: TreeNode[], depth = 0, out: { id: string
 }
 
 function MockForm({ def, workspace, onChange }: { def: MockDefinition; workspace: WorkspaceInfo; onChange(d: MockDefinition): void }) {
+  const prefix = useId()
+  const invalidPort = !Number.isInteger(def.port) || def.port < 1 || def.port > 65535
   return (
     <div className="mock-form">
       <div className="form-row">
-        <label className="field-label" htmlFor="mock-name">
+        <label className="field-label" htmlFor={`${prefix}-mock-name`}>
           Name
         </label>
-        <input id="mock-name" className="input" value={def.name} onChange={(e) => onChange({ ...def, name: e.target.value })} />
+        <input id={`${prefix}-mock-name`} className="input" value={def.name} onChange={(e) => onChange({ ...def, name: e.target.value })} />
       </div>
       <div className="form-row">
-        <label className="field-label" htmlFor="mock-target">
+        <label className="field-label" htmlFor={`${prefix}-mock-target`}>
           Collection or folder
         </label>
-        <select id="mock-target" className="select" value={def.target} onChange={(e) => onChange({ ...def, target: e.target.value })}>
+        <select id={`${prefix}-mock-target`} className="select" value={def.target} onChange={(e) => onChange({ ...def, target: e.target.value })}>
           {containerOptions(workspace.collections).map((c) => (
             <option key={c.id} value={c.id}>
               {c.label}
@@ -36,17 +39,18 @@ function MockForm({ def, workspace, onChange }: { def: MockDefinition; workspace
         </select>
       </div>
       <div className="form-row">
-        <label className="field-label" htmlFor="mock-port">
+        <label className="field-label" htmlFor={`${prefix}-mock-port`}>
           Port
         </label>
-        <input id="mock-port" className="input small" type="number" min={1} max={65535} value={def.port} onChange={(e) => onChange({ ...def, port: Number(e.target.value) || 0 })} />
+        <input id={`${prefix}-mock-port`} className="input small" type="number" min={1} max={65535} value={def.port} onChange={(e) => onChange({ ...def, port: Number(e.target.value) || 0 })} />
       </div>
       <div className="form-row">
-        <label className="field-label" htmlFor="mock-delay">
+        <label className="field-label" htmlFor={`${prefix}-mock-delay`}>
           Response delay (ms)
         </label>
-        <input id="mock-delay" className="input small" type="number" min={0} value={def.delayMs} onChange={(e) => onChange({ ...def, delayMs: Math.max(0, Number(e.target.value) || 0) })} />
+        <input id={`${prefix}-mock-delay`} className="input small" type="number" min={0} value={def.delayMs} onChange={(e) => onChange({ ...def, delayMs: Math.max(0, Number(e.target.value) || 0) })} />
       </div>
+      {invalidPort && <div className="form-error" role="alert">Port must be a whole number between 1 and 65535.</div>}
       <div className="setting-row">
         <div>
           <div className="setting-label">Start when the workspace opens</div>
@@ -94,7 +98,7 @@ export function CreateMockModal({ workspace, existingPorts, defaultTarget, onClo
           <button className="btn btn-secondary" onClick={onClose}>
             Cancel
           </button>
-          <button className="btn btn-primary" disabled={!def.target || !def.name.trim()} onClick={() => void onCreate(def)}>
+          <button className="btn btn-primary" disabled={!def.target || !def.name.trim() || !Number.isInteger(def.port) || def.port < 1 || def.port > 65535} onClick={() => void onCreate(def)}>
             Create Mock Server
           </button>
         </>
@@ -110,6 +114,8 @@ interface Props {
   info: MockInfo | undefined
   workspace: WorkspaceInfo
   logs: MockLogEntry[]
+  draft?: MockDefinition
+  onDraftChange?(def: MockDefinition): void
   onSave(def: MockDefinition): Promise<void>
   onStart(): void
   onStop(): void
@@ -117,17 +123,20 @@ interface Props {
   onError(e: unknown): void
 }
 
-export function MockView({ info, workspace, logs, onSave, onStart, onStop, onClearLog, onError }: Props) {
-  const [def, setDef] = useState<MockDefinition | null>(info?.def ?? null)
+export function MockView({ info, workspace, logs, draft, onDraftChange, onSave, onStart, onStop, onClearLog, onError }: Props) {
+  const [localDef, setLocalDef] = useState<MockDefinition | null>(info?.def ?? null)
+  const def = draft ?? localDef
+  const setDef = (next: MockDefinition) => { setLocalDef(next); onDraftChange?.(next) }
   const [routes, setRoutes] = useState<MockRoute[]>([])
   const id = info?.id
-  useEffect(() => setDef(info?.def ?? null), [id])
+  useEffect(() => setLocalDef(info?.def ?? null), [id])
   useEffect(() => {
     if (id) window.api.mockRoutes(id).then(setRoutes, () => setRoutes([]))
   }, [id, info?.status.running, info?.def.target, workspace])
   if (!info || !def) return <div className="muted-note">This mock server no longer exists.</div>
   const dirty = JSON.stringify(def) !== JSON.stringify(info.def)
   const { status } = info
+  const missingTarget = !containerOptions(workspace.collections).some((c) => c.id === def.target)
   return (
     <div className="editor mock-view">
       <div className="editor-title">
@@ -146,7 +155,7 @@ export function MockView({ info, workspace, logs, onSave, onStart, onStop, onCle
           )}
         </span>
         <span className="editor-actions">
-          <button className="btn btn-ghost" disabled={!dirty} onClick={() => void onSave(def).catch(onError)}>
+          <button className="btn btn-ghost" disabled={!dirty || !def.name.trim() || !Number.isInteger(def.port) || def.port < 1 || def.port > 65535} onClick={() => void onSave(def).catch(onError)}>
             <Save size={14} /> Save
           </button>
           {status.running ? (
@@ -154,12 +163,13 @@ export function MockView({ info, workspace, logs, onSave, onStart, onStop, onCle
               <Square size={12} /> Stop
             </button>
           ) : (
-            <button className="btn btn-primary" onClick={onStart}>
+            <button className="btn btn-primary" disabled={missingTarget} onClick={onStart}>
               <Play size={12} /> Start
             </button>
           )}
         </span>
       </div>
+      {missingTarget && <div className="form-error" role="alert">The collection or folder for this mock no longer exists. Choose another target.</div>}
       {status.error && (
         <div className="form-error" role="alert">
           {status.error}

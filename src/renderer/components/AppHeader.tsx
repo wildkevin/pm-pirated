@@ -187,7 +187,7 @@ function WorkspaceSwitcher(p: { at: DOMRect; current: string | null; workspaces:
     }
   }, [p])
   const q = query.trim().toLowerCase()
-  const shown = p.workspaces.filter((w) => w.name && (!q || w.name.toLowerCase().includes(q)))
+  const shown = p.workspaces.filter((w) => !q || `${w.name ?? ''} ${w.root}`.toLowerCase().includes(q))
   const go = (fn: () => void) => () => {
     p.onClose()
     fn()
@@ -202,11 +202,12 @@ function WorkspaceSwitcher(p: { at: DOMRect; current: string | null; workspaces:
       </div>
       <div className="ws-switcher-list" role="listbox" aria-label="Workspaces">
         {shown.map((w) => (
-          <button key={w.root} role="option" aria-selected={w.root === p.current} className={`ws-switcher-item${w.root === p.current ? ' current' : ''}`} title={w.root} onClick={go(() => p.onOpen(w.root))}>
+          <button key={w.root} role="option" disabled={!w.name} aria-selected={w.root === p.current} className={`ws-switcher-item${w.root === p.current ? ' current' : ''}`} title={w.root} onClick={go(() => p.onOpen(w.root))}>
             <span className="ws-icon">
               <Folder size={13} />
             </span>
-            {w.name}
+            {w.name ?? w.root.split(/[\\/]/).filter(Boolean).pop()}
+            {!w.name && <span className="muted"> — Folder not found</span>}
           </button>
         ))}
         {shown.length === 0 && <div className="ws-switcher-empty">{q ? 'No workspaces match.' : 'No workspaces yet.'}</div>}

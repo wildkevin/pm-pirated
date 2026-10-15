@@ -93,10 +93,16 @@ export async function workspaceName(root: string): Promise<string | null> {
   }
 }
 
+/** Read-only preview uses the same naming rules as creation. */
+export async function previewWorkspacePath(parent: string, name: string): Promise<string> {
+  const taken = await entryNames(parent).catch((e) => { if (isEnoent(e)) return []; throw e })
+  return join(parent, uniqueName(sanitizeName(name), taken))
+}
+
 /** New workspace folder "<parent>/<name>" (made unique), initialised and named. */
 export async function createWorkspaceIn(parent: string, name: string): Promise<string> {
   await mkdir(parent, { recursive: true })
-  const dir = join(parent, uniqueName(sanitizeName(name), await entryNames(parent)))
+  const dir = await previewWorkspacePath(parent, name)
   await mkdir(dir)
   await initWorkspace(dir, name)
   return dir
@@ -110,6 +116,12 @@ export async function openWorkspace(root: string): Promise<WorkspaceInfo> {
     throw new WorkspaceError(`Cannot read workspace.json in ${root}: ${(e as Error).message}`)
   }
   if (meta.formatVersion !== 1) throw new WorkspaceError(`Unsupported workspace format: ${meta.formatVersion}`)
+  // Local state is not versioned; a freshly copied/cloned workspace may not have it yet.
+  const local = join(root, '.pmlocal')
+  try { if (lstatSync(local).isSymbolicLink()) throw new WorkspaceError('The workspace local-state folder must not be a symbolic link') }
+  catch (e) { if (!isEnoent(e)) throw e }
+  await mkdir(local, { recursive: true })
+  await writeFileAtomic(join(local, '.gitignore'), '*\n')
   const dir = collectionsDir(root)
   const entries = await readdir(dir, { withFileTypes: true }).catch((e) => (isEnoent(e) ? [] : Promise.reject(e)))
   const collections = await Promise.all(

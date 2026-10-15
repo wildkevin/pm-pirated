@@ -1,5 +1,6 @@
 import { Check, Folder, FolderOpen, LayoutGrid, MoreHorizontal, Search } from 'lucide-react'
 import { useEffect, useState } from 'react'
+import { sanitizeName } from '../../shared/format/names'
 import type { WorkspaceInfo } from '../../shared/format/types'
 import type { CreateWorkspaceInput, WorkspaceListItem } from '../../shared/ipc'
 import { cleanError } from '../lib/body'
@@ -8,10 +9,17 @@ import { Menu } from './common/ui'
 const baseName = (dir: string) => dir.split(/[\\/]/).filter(Boolean).pop() ?? dir
 
 /** Postman 12's "Create your workspace" page, with a folder location instead of team access. */
-export function CreateWorkspacePage({ onCancel, onCreated, onOpenExisting }: { onCancel?(): void; onCreated(ws: WorkspaceInfo): void; onOpenExisting(): void }) {
+export function CreateWorkspacePage({ onCancel, onCreated, onOpenExisting, createWorkspace }: { createWorkspace?(input: CreateWorkspaceInput): Promise<WorkspaceInfo>; onCancel?(): void; onCreated(ws: WorkspaceInfo): void; onOpenExisting(): void }) {
   const [name, setName] = useState('')
   const [setup, setSetup] = useState<'blank' | 'folder'>('blank')
   const [location, setLocation] = useState('')
+  const [preview, setPreview] = useState('')
+  useEffect(() => {
+    let current = true
+    setPreview('')
+    if (setup === 'blank' && location && name.trim()) void window.api.previewWorkspacePath(location, name.trim()).then((p) => { if (current) setPreview(p) }, () => undefined)
+    return () => { current = false }
+  }, [setup, location, name])
   const [folder, setFolder] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -34,7 +42,7 @@ export function CreateWorkspacePage({ onCancel, onCreated, onOpenExisting }: { o
     setError(null)
     try {
       const input: CreateWorkspaceInput = setup === 'blank' ? { name: name.trim(), setup, location } : { name: name.trim(), setup, folder: folder! }
-      onCreated(await window.api.createWorkspace(input))
+      onCreated(await (createWorkspace ?? window.api.createWorkspace)(input))
     } catch (e) {
       setError(cleanError(e))
       setBusy(false)
@@ -60,8 +68,8 @@ export function CreateWorkspacePage({ onCancel, onCreated, onOpenExisting }: { o
           <span id="ws-location-label">Location</span>
           <div className="ws-location" aria-labelledby="ws-location-label">
             <Folder size={14} />
-            <span className="ws-location-path" title={location}>
-              {setup === 'blank' ? `${location}${location.includes('\\') ? '\\' : '/'}${name.trim() || '…'}` : (folder ?? 'Choose a folder below')}
+            <span className="ws-location-path" title={preview || location}>
+              {setup === 'blank' ? preview || `${location}${location.includes('\\') ? '\\' : '/'}${name.trim() ? sanitizeName(name.trim()) : '…'}` : (folder ?? 'Choose a folder below')}
             </span>
             {setup === 'blank' && (
               <button type="button" className="btn btn-ghost btn-small" onClick={() => void pick('location')}>
@@ -70,6 +78,7 @@ export function CreateWorkspacePage({ onCancel, onCreated, onOpenExisting }: { o
             )}
           </div>
         </div>
+        <p className="muted">{setup === 'blank' ? 'The folder name is made safe for Windows. If it already exists, a numbered suffix is added.' : 'An existing workspace opens with its saved name. To create a workspace with this name, choose an empty folder.'}</p>
         <div className="ws-field">
           <span>Choose how you'd like to set up this workspace</span>
           <div className="ws-cards" role="radiogroup" aria-label="Workspace setup">

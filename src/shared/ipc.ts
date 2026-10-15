@@ -105,6 +105,7 @@ export interface Api {
   refreshWorkspace(): Promise<WorkspaceInfo>
   /** Where "Create workspace" puts new workspace folders unless another location is chosen. */
   defaultWorkspaceLocation(): Promise<string>
+  previewWorkspacePath(location: string, name: string): Promise<string>
   /** Folder picker for the create page ('location' = parent folder, 'existing' = a project folder). */
   pickFolder(purpose: 'location' | 'existing'): Promise<string | null>
   /** Postman's "Create your workspace": a blank workspace in `location`, or one in an existing folder. */
@@ -240,6 +241,7 @@ export const CHANNELS = {
   refreshWorkspace: 'workspace:refresh',
   openRecentWorkspace: 'workspace:openRecent',
   defaultWorkspaceLocation: 'workspace:defaultLocation',
+  previewWorkspacePath: 'workspace:previewPath',
   pickFolder: 'workspace:pickFolder',
   createWorkspace: 'workspace:create',
   listWorkspaces: 'workspace:list',

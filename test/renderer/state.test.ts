@@ -205,3 +205,18 @@ describe('persistence', () => {
     expect(reducer(withTabs('a'), { type: 'workspace', workspace: ws('/other') }).tabs).toHaveLength(0)
   })
 })
+
+
+it('retains unsaved mock edits across tab changes and clears dirty only on save (MOCK-6)', () => {
+  const draft = { name: 'Mock', target: 'collections/C', port: 4500, allowLan: false, delayMs: 0, autoStart: false }
+  let s = reducer(withTabs('request'), { type: 'open', id: 'mocks/M.mock.json', doc: { kind: 'mock', title: 'Mock', draft } })
+  const key = s.activeKey!
+  expect(isDirty(activeTab(s)!)).toBe(false)
+  s = reducer(s, { type: 'setMockDraft', key, draft: { ...draft, port: 4501 } })
+  s = reducer(s, { type: 'activate', key: s.tabs[0].key })
+  s = reducer(s, { type: 'activate', key })
+  expect(isDirty(activeTab(s)!)).toBe(true)
+  expect(activeTab(s)!.doc).toMatchObject({ draft: { port: 4501 } })
+  s = reducer(s, { type: 'saved', key, doc: activeTab(s)!.doc })
+  expect(isDirty(activeTab(s)!)).toBe(false)
+})

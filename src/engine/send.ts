@@ -42,14 +42,15 @@ export function toRuntimeUrl(url: PmUrl): unknown {
   return {
     ...Url.parse(raw),
     raw,
-    ...(url.query ? { query: url.query } : {}),
+    // The visible raw URL contains only enabled params, preserving flag versus empty=.
+    query: Url.parse(raw).query,
     ...(url.variable ? { variable: url.variable } : {}),
   }
 }
 
 /** Nest the request inside its collection/folder chain so auth, scripts and variables inherit. */
 export function buildCollection(item: PmItem, parents: PmContainer[]): Record<string, unknown> {
-  const request = { ...item, request: { ...item.request, url: toRuntimeUrl(item.request.url) } }
+  const request = { ...item, protocolProfileBehavior: { ...item.protocolProfileBehavior, disableBodyPruning: item.protocolProfileBehavior?.disableBodyPruning ?? true }, request: { ...item.request, url: toRuntimeUrl(item.request.url) } }
   let node: Record<string, unknown> = request
   for (let i = parents.length - 1; i >= 1; i--) {
     const { name, auth, event, description } = parents[i]
@@ -75,7 +76,7 @@ export function formatArg(a: unknown): string {
  * upload ~/.ssh/id_rsa). Certificates configured in Settings are reachable only through `privateFiles`,
  * whose names are random per send, so a request body cannot name them.
  */
-export function fileResolver(workingDir: string, allowOutside: boolean, privateFiles: Map<string, string> = new Map()): unknown {
+export function fileResolver(workingDir: string, allowOutside: boolean, privateFiles: Map<string, string> = new Map(), onError?: (error: Error) => void): unknown {
   const root = realOrSelf(workingDir)
   const check = (p: string): string => {
     const configured = privateFiles.get(p)
@@ -97,11 +98,15 @@ export function fileResolver(workingDir: string, allowOutside: boolean, privateF
         try {
           abs = check(p)
         } catch (e) {
+          onError?.(e as Error)
           const cb = rest.at(-1)
           if (typeof cb === 'function') return void cb(e)
           throw e
         }
-        return (value as (...a: unknown[]) => unknown).call(target, abs, ...rest)
+        const cb = rest.at(-1)
+        if (typeof cb === 'function') rest[rest.length - 1] = (error: Error | null, ...args: unknown[]) => { if (error) onError?.(error); cb(error, ...args) }
+        try { return (value as (...a: unknown[]) => unknown).call(target, abs, ...rest) }
+        catch (error) { onError?.(error as Error); throw error }
       }
     },
   })
@@ -194,6 +199,7 @@ export function runtimeOptions(
   ctx: RunContext,
   scopes: { environment?: unknown; globals: unknown },
   deps: SendDeps,
+  onFileError?: (error: Error) => void,
 ): Record<string, unknown> {
   const o = ctx.options
   const privateFiles = new Map<string, string>()
@@ -207,12 +213,13 @@ export function runtimeOptions(
     environment: scopes.environment,
     globals: scopes.globals,
     timeout: { request: o.timeoutMs },
-    fileResolver: fileResolver(ctx.workingDir, o.allowFilesOutsideWorkingDir, privateFiles),
+    fileResolver: fileResolver(ctx.workingDir, o.allowFilesOutsideWorkingDir, privateFiles, onFileError),
     ignoreProxyEnvironmentVariables: !o.respectProxyEnv,
     proxies: proxyList(o),
     certificates: certificateList(o, privateName),
     requester: {
       cookieJar: jarFor(ctx.cookieFile),
+      useWhatWGUrlParser: !!(ctx as Partial<SendSpec>).item?.protocolProfileBehavior?.disableUrlEncoding,
       strictSSL: o.strictSSL,
       followRedirects: o.followRedirects,
       implicitTraceHeader: o.sendPostmanToken,
@@ -235,7 +242,7 @@ export function runtimeOptions(
 export function startSend(spec: SendSpec, deps: SendDeps = {}): SendHandle {
   let resolveResult!: (r: SendOutcome) => void
   const result = new Promise<SendOutcome>((r) => (resolveResult = r))
-  const report: RunReport = { response: { ok: false, error: 'No response received' }, tests: [], logs: [], scriptErrors: [], cookies: [] }
+  const report: RunReport = { response: { ok: false, error: 'No response received' }, tests: [], logs: [], scriptErrors: [], cookies: [], timeline: [] }
   const environment = spec.environment ? new VariableScope({ name: spec.environment.name, values: spec.environment.values }) : undefined
   const globals = new VariableScope({ values: spec.globals })
   let collectionVariables: PmVariable[] = spec.parents[0]?.variable ?? []
@@ -259,7 +266,8 @@ export function startSend(spec: SendSpec, deps: SendDeps = {}): SendHandle {
   }
 
   const collection = new Collection(buildCollection(spec.item, spec.parents))
-  const runOptions = runtimeOptions(spec, { environment, globals }, deps)
+  let fileError: Error | undefined
+  const runOptions = { ...runtimeOptions(spec, { environment, globals }, deps, error => { fileError = error }), stopOnError: true }
 
   const scriptResult = (results: any[] | undefined) => {
     for (const r of results ?? []) {
@@ -278,7 +286,9 @@ export function startSend(spec: SendSpec, deps: SendDeps = {}): SendHandle {
     run = r
     r.start({
       console(cursor: { scriptId?: string } | undefined, level: LogEntry['level'], ...args: unknown[]) {
-        report.logs.push({ level, args: args.map(formatArg) })
+        const log = { level, args: args.map(formatArg) }
+        report.logs.push(log)
+        report.timeline!.push({ kind: 'log', log })
       },
       assertion(_cursor: unknown, assertions: any[]) {
         for (const a of assertions)
@@ -286,18 +296,42 @@ export function startSend(spec: SendSpec, deps: SendDeps = {}): SendHandle {
       },
       prerequest(_err: unknown, _cursor: unknown, results: any[]) {
         scriptResult(results)
+        if (report.scriptErrors.length) report.response = { ok: false, error: 'Before request script failed; request was not sent.' }
       },
       test(_err: unknown, _cursor: unknown, results: any[]) {
         scriptResult(results)
       },
-      request(_err: unknown, _cursor: unknown, _response: unknown, request: any) {
-        if (request) report.sent = toSent(request)
+      beforeRequest(_err: unknown, _cursor: unknown, request: any, _item: unknown, controls: { abort(): void }) {
+        try {
+          if (fileError) throw fileError
+          const body = request.body
+          if (!body?.disabled && body?.mode === 'graphql' && body.graphql?.variables?.trim()) {
+            const parsed = JSON.parse(body.graphql.variables)
+            if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object') throw new Error('GraphQL variables must be a JSON object.')
+          }
+        } catch (error) {
+          controls.abort()
+          report.response = { ok: false, error: `Cannot send request body: ${error instanceof Error ? error.message : String(error)}` }
+          finish()
+        }
       },
-      response(err: NodeJS.ErrnoException | null, _cursor: unknown, res: unknown) {
+      request(err: NodeJS.ErrnoException | null, _cursor: unknown, response: any, request: any) {
+        if (request) {
+          const sent = toSent(request)
+          if (!(_cursor as { scriptId?: string })?.scriptId && spec.item.protocolProfileBehavior?.disableBodyPruning === false && /^(GET|HEAD)$/i.test(request.method)) delete sent.body
+          report.timeline!.push({ kind: 'request', sent, response: err ? { ok: false, error: err.message, code: err.code } : toResult(response) })
+        }
+      },
+      response(err: NodeJS.ErrnoException | null, cursor: { source?: string }, res: unknown, request: any) {
+        if (cursor?.source) return // pm.sendRequest/auth calls have their own timeline row.
+        if (request) {
+          report.sent = toSent(request)
+          if (spec.item.protocolProfileBehavior?.disableBodyPruning === false && /^(GET|HEAD)$/i.test(request.method)) delete report.sent.body
+        }
         report.response = err ? { ok: false, error: err.message, code: err.code } : toResult(res)
       },
       done(err: Error | null) {
-        if (err) report.response = { ok: false, error: err.message }
+        if (err && !settled) report.response = { ok: false, error: err.message }
         saveJar(spec.cookieFile)
         finish()
       },

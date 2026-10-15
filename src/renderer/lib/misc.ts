@@ -18,6 +18,25 @@ export function fromBulk(text: string): PmKeyValue[] {
     })
 }
 
+/** Preserve duplicate rows' metadata, including when unchanged duplicate values move. */
+export function mergeBulkRows<T extends PmKeyValue>(text: string, previous: T[]): T[] {
+  const parsed = fromBulk(text)
+  const used = new Set<number>()
+  const matches = parsed.map((row) => {
+    const index = previous.findIndex((old, i) => !used.has(i) && old.key === row.key && old.value === row.value)
+    if (index >= 0) used.add(index)
+    return index
+  })
+  return parsed.map((row, i) => {
+    let index = matches[i]
+    if (index < 0) {
+      index = previous.findIndex((old, j) => !used.has(j) && old.key === row.key)
+      if (index >= 0) used.add(index)
+    }
+    return { ...previous[index], ...row, disabled: row.disabled } as T
+  })
+}
+
 /** "Today", "Yesterday" or e.g. "October 13" (with year if not this year), for history groups. */
 export function dayLabel(ts: number, now = Date.now()): string {
   const d = new Date(ts)

@@ -23,6 +23,10 @@ export async function readUiState(root: string): Promise<UiState> {
   }
 }
 
+const pending = new Map<string, Promise<void>>()
 export async function writeUiState(root: string, state: UiState): Promise<void> {
-  await writeFileAtomic(file(root), JSON.stringify(state))
+  const text = JSON.stringify(state)
+  const next = (pending.get(root) ?? Promise.resolve()).catch(() => undefined).then(() => writeFileAtomic(file(root), text))
+  pending.set(root, next)
+  try { await next } finally { if (pending.get(root) === next) pending.delete(root) }
 }

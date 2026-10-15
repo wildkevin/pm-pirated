@@ -10,6 +10,7 @@ import {
   deleteNode,
   duplicateNode,
   createWorkspaceIn,
+  previewWorkspacePath,
   workspaceName,
   initWorkspace,
   isWorkspace,
@@ -22,6 +23,7 @@ import {
   resolveInside,
   saveRequest,
 } from '../../src/main/workspace/store'
+import { readUiState, writeUiState } from '../../src/main/workspace/uiState'
 import { writeFileAtomic } from '../../src/main/workspace/fsAtomic'
 import type { TreeNode } from '../../src/shared/format/types'
 
@@ -273,5 +275,26 @@ describe('create workspace', () => {
     const b = await createWorkspaceIn(join(root, 'PM Local'), 'Payments: v2')
     expect(b).not.toBe(a)
     expect(await workspaceName(join(root, 'missing'))).toBeNull()
+  })
+})
+
+
+describe('workspace QA regressions', () => {
+  it('previews sanitized and duplicate folder names exactly as creation (WS-4)', async () => {
+    const preview = await previewWorkspacePath(root, 'a/b:c')
+    expect(preview).toBe(join(root, 'a_b_c'))
+    expect(await createWorkspaceIn(root, 'a/b:c')).toBe(preview)
+    const second = await previewWorkspacePath(root, 'a/b:c')
+    expect(second).toBe(join(root, 'a_b_c (2)'))
+    expect(await createWorkspaceIn(root, 'a/b:c')).toBe(second)
+  })
+  it('orders UI writes and keeps workspace drafts isolated (WS-1/2)', async () => {
+    const other = await mkdtemp(join(tmpdir(), 'pml-ui-other-'))
+    await initWorkspace(root)
+    await initWorkspace(other)
+    const state = (name: string) => ({ activeEnvironment: null, activeIndex: 0, favorites: [name], tabs: [{ id: null, item: { name, request: { method: 'GET', url: `https://example.test/${name}`, header: [] } } }] })
+    await Promise.all(Array.from({ length: 20 }, (_, i) => writeUiState(root, state(`draft-${i}`))).concat(writeUiState(other, state('other'))))
+    expect(await readUiState(root)).toMatchObject(state('draft-19'))
+    expect(await readUiState(other)).toMatchObject(state('other'))
   })
 })

@@ -1,6 +1,7 @@
 // One mock HTTP server: serves saved examples using Postman-like matching.
 import { VariableScope } from 'postman-collection'
 import http from 'node:http'
+import { networkInterfaces } from 'node:os'
 import type { AddressInfo } from 'node:net'
 import { matchRoute, type MockLogEntry, type MockRoute } from '../shared/mock'
 
@@ -32,6 +33,7 @@ export function startMockServer(
   const server = http.createServer((req, res) => {
     // Refuse Host names a web page could point at us through DNS rebinding.
     if (!(config.host === '127.0.0.1' ? LOCAL_HOSTS : IP_HOSTS).test(req.headers.host ?? '')) {
+      onLog({ ts: Date.now(), method: req.method ?? 'GET', path: req.url ?? '/', code: 403, reason: 'Forbidden host: use localhost or an allowed IP address' })
       res.writeHead(403, { 'Content-Type': 'text/plain' })
       return void res.end('Forbidden host')
     }
@@ -58,6 +60,7 @@ export function startMockServer(
             'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS',
             'Access-Control-Allow-Headers': String(req.headers['access-control-request-headers'] ?? '*'),
           })
+          onLog({ ts: Date.now(), method: 'OPTIONS', path: url, code: 204, reason: 'CORS preflight' })
           return void res.end()
         }
       }
@@ -86,7 +89,7 @@ export function startMockServer(
     server.listen(config.port, config.host, () => {
       const { port } = server.address() as AddressInfo
       resolve({
-        url: `http://${config.host === '0.0.0.0' ? 'localhost' : config.host}:${port}`,
+        url: `http://${config.host === '0.0.0.0' ? (Object.values(networkInterfaces()).flat().find((i) => i?.family === 'IPv4' && !i.internal)?.address ?? 'localhost') : config.host}:${port}`,
         setRoutes: (next) => (routes = next),
         close: () => new Promise((r) => (server.closeAllConnections(), server.close(() => r()))),
       })

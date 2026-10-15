@@ -17,6 +17,7 @@ export function CodePanel({ requestId, item, environmentId, onClose }: { request
   const [languages, setLanguages] = useState<CodeLanguage[]>([])
   const [choice, setChoice] = useState(() => localStorage.getItem(PREF_KEY) ?? 'curl|cURL')
   const [code, setCode] = useState('')
+  const [copied, setCopied] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [lang, variant] = choice.split('|')
 
@@ -35,9 +36,9 @@ export function CodePanel({ requestId, item, environmentId, onClose }: { request
   return (
     <aside className="code-panel" aria-label="Code snippet">
       <div className="code-panel-head">
-        <span className="section-title">Code snippet</span>
+        <span className="section-title">Code snippet</span>{copied && <span role="status">Copied</span>}
         <span className="spacer" />
-        <button className="btn-icon" aria-label="Copy snippet" title="Copy" onClick={() => void navigator.clipboard.writeText(code)}>
+        <button className="btn-icon" aria-label="Copy snippet" title="Copy" onClick={() => void navigator.clipboard.writeText(code).then(() => setCopied(true)).catch(e => setError(cleanError(e)))}>
           <Copy size={14} />
         </button>
         <button className="btn-icon" aria-label="Close code snippet" onClick={onClose}>

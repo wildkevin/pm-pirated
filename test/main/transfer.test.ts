@@ -9,6 +9,8 @@ import { initWorkspace, openWorkspace, readRequest } from '../../src/main/worksp
 import { curlToItem, detect, exportCollection, exportEnvironment, importDetected } from '../../src/main/workspace/transfer'
 import { readUiState, writeUiState } from '../../src/main/workspace/uiState'
 import { Variables } from '../../src/main/workspace/variables'
+import { queryParams, rawUrl, setQueryParams } from '../../src/shared/format/url'
+import { Url } from 'postman-collection'
 
 let root: string
 let vars: Variables
@@ -35,6 +37,25 @@ describe('detect', () => {
 })
 
 describe('collection import', () => {
+  it('round-trips encoded query rows and can enable imported disabled parameters without double encoding', async () => {
+    const raw = 'https://example.test/?plus=%2B&flag&empty='
+    const original = { info: { name: 'Encoded' }, item: [{ name: 'Query', request: { method: 'GET', url: {
+      raw, query: [{ key: 'plus', value: '%2B' }, { key: 'flag', value: null }, { key: 'empty', value: '' },
+        { key: 'off%26key', value: 'a%3Db', disabled: true, description: 'Disabled value' }],
+    } } }] }
+    const imported = await importDetected(root, detect(JSON.stringify(original)), vars)
+    const item = await readRequest(root, `${imported.id}/Query.request.json`)
+    expect(queryParams(item.request.url)).toEqual([
+      { key: 'plus', value: '+' }, { key: 'flag', value: '', hasEquals: false }, { key: 'empty', value: '', hasEquals: true },
+      { key: 'off&key', value: 'a=b', disabled: true, description: 'Disabled value' },
+    ])
+    expect(rawUrl(setQueryParams(item.request.url, queryParams(item.request.url).map((q) => ({ ...q, disabled: false }))))).toBe(`${raw}&off%26key=a%3Db`)
+    const exported = await exportCollection(root, imported.id)
+    expect(new Url(exported.item[0].request.url).toString()).toBe(raw)
+    const again = await importDetected(root, detect(JSON.stringify(exported)), vars)
+    expect((await readRequest(root, `${again.id}/Query.request.json`)).request.url).toEqual(item.request.url)
+  })
+
   it('writes folders, requests, auth, scripts and variables, keeping secrets out of files', async () => {
     const r = await importDetected(root, detect(await fixture()), vars)
     expect(r).toMatchObject({ kind: 'collection', id: 'collections/Sample API', name: 'Sample API', detail: '4 requests' })
@@ -127,6 +148,13 @@ describe('cURL', () => {
     })
     const form = await curlToItem(`curl -F 'f=@/tmp/a.txt' -F t=v https://x.test/u`)
     expect(form.request.body).toEqual({ mode: 'formdata', formdata: [{ key: 'f', type: 'file', src: '/tmp/a.txt', value: '' }, { type: 'text', key: 't', value: 'v' }] })
+  })
+
+  it('turns -u / --user into Basic auth (QA REQ-2)', async () => {
+    const basic = (user: string, pass: string) => ({ type: 'basic', basic: [{ key: 'username', value: user }, { key: 'password', value: pass }] })
+    expect((await curlToItem(`curl -u alice:secret 'http://127.0.0.1/x'`)).request.auth).toEqual(basic('alice', 'secret'))
+    expect((await curlToItem(`curl --user "bob:p w:d" http://127.0.0.1/x`)).request.auth).toEqual(basic('bob', 'p w:d'))
+    expect((await curlToItem(`curl --user=carol http://127.0.0.1/x`)).request.auth).toEqual(basic('carol', ''))
   })
 })
 

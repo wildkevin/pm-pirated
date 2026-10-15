@@ -3050,3 +3050,35 @@ kbd {
   text-align: center;
   color: var(--content-secondary);
 }
+
+/* Keep the central work area useful when zoom changes the CSS viewport. */
+.workbench, .workbench-content, .request-area, .request-main { min-width: 0; }
+.tabs-row { container-type: inline-size; }
+.tabs { position: relative; scroll-padding-inline: 2px; }
+.tab { min-width: 120px; max-width: 170px; }
+.tab-new, .tabs-list-btn { flex-shrink: 0; }
+.tab-title { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.env-selector { flex: 0 1 150px; min-width: 85px; }
+.env-selector .env-select { width: 100%; min-width: 0; }
+@container (max-width: 650px) {
+  .env-selector { flex-basis: 110px; }
+  .tab { width: 140px; padding-inline: 14px 24px; }
+}
+.subtabs { overflow-x: auto; scrollbar-width: thin; }
+.subtabs > * { flex-shrink: 0; }
+.subtabs::-webkit-scrollbar { height: 5px; }
+.subtabs::-webkit-scrollbar-thumb { background: var(--border-strong, #aaa); border-radius: 3px; }
+@media (max-width: 749px) {
+  .status-bar { overflow-x: auto; }
+  .status-btn { flex-shrink: 0; }
+}
+
+.panel-overlay-backdrop { position: fixed; inset: 48px 0 24px; z-index: 80; background: #0003; }
+.panel-overlay { position: absolute; top: 0; bottom: 0; width: min(320px, 90vw); background: var(--bg-primary); box-shadow: 0 4px 16px #0003; }
+.panel-overlay.right { right: 0; }
+.panel-overlay.left { left: 0; }
+
+.rp-overridden .rp-value { text-decoration: line-through; color: var(--content-tertiary); }
+.rp-override-label { display: block; font-size: 10px; color: var(--content-tertiary); }
+
+.workbench-page { height: 100%; min-height: 0; min-width: 0; display: flex; flex-direction: column; }

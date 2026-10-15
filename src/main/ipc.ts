@@ -114,6 +114,11 @@ export function registerIpc(deps: IpcDeps): void {
       return store.openWorkspace(last)
     },
     defaultWorkspaceLocation: async () => defaultLocation(),
+    async previewWorkspacePath(location, name) {
+      const parent = resolve(location)
+      if (parent !== defaultLocation() && !pickedFolders.has(parent)) throw new WorkspaceError('Choose the location with the folder picker')
+      return store.previewWorkspacePath(parent, name)
+    },
     async pickFolder(purpose) {
       const res = await dialog.showOpenDialog(deps.win, {
         title: purpose === 'location' ? 'Choose where to create the workspace' : 'Choose your project folder',
@@ -134,7 +139,9 @@ export function registerIpc(deps: IpcDeps): void {
       } else {
         dir = resolve(input.folder)
         if (!pickedFolders.has(dir)) throw new WorkspaceError('Choose the folder with the folder picker')
-        // An existing workspace is opened as it is; any other folder becomes one (its files are untouched).
+        // Do not silently ignore the entered name when the selected folder is already a workspace.
+        const existingName = await store.workspaceName(dir)
+        if (existingName && existingName !== name) throw new WorkspaceError(`This folder already contains workspace "${existingName}". Use that name to open it, or choose another folder.`)
         if (!(await store.isWorkspace(dir))) await store.initWorkspace(dir, name)
       }
       use(dir)
@@ -253,11 +260,11 @@ export function registerIpc(deps: IpcDeps): void {
       const scopes: [ResolvedVariable['scope'], string][] = [['globals', 'globals']]
       if (requestId) scopes.push(['collection', `col:${store.collectionOf(requestId)}`])
       if (environmentId) scopes.push(['environment', `env:${environmentId}`])
-      const out = new Map<string, ResolvedVariable>()
+      const out: ResolvedVariable[] = []
       for (const [scope, ref] of scopes)
         for (const r of await v.effective(ref).catch(() => []))
-          out.set(r.key, { key: r.key, value: r.value, scope, secret: r.type === 'secret' })
-      return [...out.values()]
+          out.push({ key: r.key, value: r.value, scope, secret: r.type === 'secret' })
+      return out
     },
     async cancelRequest(sendId) {
       await deps.engine.call('cancel', { sendId })

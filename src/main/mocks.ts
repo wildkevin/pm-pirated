@@ -72,10 +72,12 @@ export async function deleteDefinition(root: string, id: string): Promise<void> 
 export async function buildRoutes(root: string, target: string): Promise<MockRoute[]> {
   const doc = await exportCollection(root, collectionOf(target), true)
   const routes: MockRoute[] = []
+  let targetFound = collectionOf(target) === target
   const walk = (items: Json[], inside: boolean) => {
     for (const it of items) {
       const here = inside || it.id === target
       if (Array.isArray(it.item)) {
+        if (it.id === target) targetFound = true
         walk(it.item, here)
         continue
       }
@@ -103,6 +105,7 @@ export async function buildRoutes(root: string, target: string): Promise<MockRou
     }
   }
   walk(doc.item, collectionOf(target) === target)
+  if (!targetFound) throw new WorkspaceError('The mock target folder no longer exists')
   return routes
 }
 
@@ -110,6 +113,7 @@ export async function buildRoutes(root: string, target: string): Promise<MockRou
 export class MockManager {
   private status = new Map<string, MockStatus>()
   private targets = new Map<string, string>()
+  private ports = new Map<string, number>()
 
   constructor(
     private client: MockClient,
@@ -132,6 +136,8 @@ export class MockManager {
   async start(root: string, id: string, localOnly = false): Promise<MockStatus> {
     const def = validateDefinition(JSON.parse(await readFile(mockPath(root, id), 'utf8')))
     try {
+      if ([...this.ports].some(([other, port]) => other !== id && port === def.port)) throw new WorkspaceError(`Port ${def.port} is already in use by another mock`)
+      this.ports.set(id, def.port)
       const { url } = await this.client.call('start', {
         id,
         host: def.allowLan && !localOnly ? '0.0.0.0' : '127.0.0.1',
@@ -143,6 +149,7 @@ export class MockManager {
       this.targets.set(id, def.target)
       return this.set({ id, running: true, url })
     } catch (e) {
+      this.ports.delete(id)
       return this.set({ id, running: false, error: (e as Error).message })
     }
   }
@@ -150,6 +157,7 @@ export class MockManager {
   async stop(id: string): Promise<MockStatus> {
     await this.client.call('stop', { id }).catch(() => undefined)
     this.targets.delete(id)
+    this.ports.delete(id)
     return this.set({ id, running: false })
   }
 
@@ -165,7 +173,12 @@ export class MockManager {
   async refresh(root: string, collectionId: string): Promise<void> {
     for (const [id, target] of this.targets) {
       if (collectionOf(target) !== collectionId) continue
-      await this.client.call('setRoutes', { id, routes: await buildRoutes(root, target).catch(() => []) }).catch(() => undefined)
+      try {
+        await this.client.call('setRoutes', { id, routes: await buildRoutes(root, target) })
+      } catch {
+        await this.stop(id)
+        this.set({ id, running: false, error: 'The mock target is unavailable. Choose an existing collection or folder.' })
+      }
     }
   }
 

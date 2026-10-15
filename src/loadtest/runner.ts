@@ -6,10 +6,9 @@ import { Collection, VariableScope } from 'postman-collection'
 import type { LoadSpec } from '../shared/engine'
 import { runtimeOptions, type SendDeps } from '../engine/send'
 import { summarize, tickOf, type LoadSummary, type Sample, type Tick } from './metrics'
-import { vusAt } from './profile'
+import { MAX_VUS, validateLoadProfile, vusAt } from './profile'
+export { MAX_VUS } from './profile'
 
-/** Hard cap on virtual users, whatever the profile asks for. */
-export const MAX_VUS = 500
 // ponytail: all VUs share one event loop; move VUs to worker_threads if one core becomes the limit.
 const CPU_WARN = 75
 const CPU_STOP = 95
@@ -22,6 +21,7 @@ export interface LoadHandle {
 }
 
 export function startLoadTest(spec: LoadSpec, onTick: (t: Tick) => void, deps: SendDeps = {}): LoadHandle {
+  validateLoadProfile(spec.profile)
   const t0 = Date.now()
   const collection = new Collection(spec.collection)
   const samples: Sample[] = []
@@ -43,7 +43,12 @@ export function startLoadTest(spec: LoadSpec, onTick: (t: Tick) => void, deps: S
     // Each VU has its own cookies, like separate users.
     options.requester = { ...options.requester, cookieJar: new CookieJar() }
     options.iterationCount = FOREVER
-    if (spec.data.length) options.data = spec.data
+    if (spec.data.length) options.data = {
+      length: FOREVER,
+      async *[Symbol.asyncIterator]() {
+        for (let iteration = 0; iteration < FOREVER; iteration++) yield spec.data[iteration % spec.data.length]
+      },
+    }
     const handle = { abort: () => (handle.aborted = true), aborted: false } as { abort(): void; aborted: boolean }
     vus.push(handle)
     new runtime.Runner().run(collection, options, (err, run) => {

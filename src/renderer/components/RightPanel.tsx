@@ -125,9 +125,9 @@ function VariablesView({ active, resolved, environmentName, onEdit }: Props) {
                 <table className="rp-table">
                   <tbody>
                     {list.map((v) => (
-                      <tr key={v.key}>
+                      <tr key={v.key} className={byKey.get(v.key)?.scope !== v.scope ? 'rp-overridden' : undefined}>
                         <td className="rp-key" title={v.key}>
-                          {v.key}
+                          {v.key}{byKey.get(v.key)?.scope !== v.scope && <span className="rp-override-label">Overridden</span>}
                         </td>
                         <td className="rp-value" title={v.secret ? undefined : v.value}>
                           {v.secret ? '••••••' : v.value}

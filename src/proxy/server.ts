@@ -109,6 +109,11 @@ export function startCaptureProxy(config: ProxyConfig, deps: ProxyDeps): Promise
 
   /** Forwards one (plain or decrypted) request to the real server and records it. */
   async function forward(req: http.IncomingMessage, res: http.ServerResponse, target: URL) {
+    // URL parses the authority safely; keep the original request-target bytes for forwarding.
+    const incoming = req.url ?? '/'
+    const path = incoming.startsWith('/') ? incoming : incoming.replace(/^[a-z][a-z0-9+.-]*:\/\/[^/?#]+/i, '') || '/'
+    const wirePath = path.startsWith('?') ? '/' + path : path
+    const wireUrl = target.origin + wirePath
     const started = Date.now()
     const record = shouldRecord(filter, req.method ?? 'GET', target.hostname)
     const reqTap = tap()
@@ -117,7 +122,7 @@ export function startCaptureProxy(config: ProxyConfig, deps: ProxyDeps): Promise
       id: ++seq,
       ts: started,
       method: req.method ?? 'GET',
-      url: target.toString(),
+      url: wireUrl,
       tunnel: false,
       requestHeaders: toList(req.headers).filter((h) => !HOP_BY_HOP.test(h.key)),
       requestBody: '',
@@ -166,11 +171,11 @@ export function startCaptureProxy(config: ProxyConfig, deps: ProxyDeps): Promise
         host: upstream.host,
         port: upstream.port,
         method: req.method,
-        path: target.toString(),
+        path: wireUrl,
         headers: { ...headers, ...(upstream.auth ? { 'Proxy-Authorization': `Basic ${Buffer.from(upstream.auth).toString('base64')}` } : {}) },
       })
     } else if (!secure) {
-      upReq = http.request({ host: target.hostname, port, method: req.method, path: target.pathname + target.search, headers })
+      upReq = http.request({ host: target.hostname, port, method: req.method, path: wirePath, headers })
     } else {
       const socket = upstream ? await connectThrough(upstream, target.hostname, port).catch((e: Error) => (onError(e), null)) : undefined
       if (socket === null) return
@@ -178,7 +183,7 @@ export function startCaptureProxy(config: ProxyConfig, deps: ProxyDeps): Promise
         host: target.hostname,
         port,
         method: req.method,
-        path: target.pathname + target.search,
+        path: wirePath,
         headers,
         servername: net.isIP(target.hostname) ? undefined : target.hostname,
         ca,

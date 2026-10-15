@@ -56,7 +56,8 @@ describe('mock server', () => {
 
   it('CORS is opt-in, and localhost-only mocks refuse foreign Host headers', async () => {
     const http = await import('node:http')
-    mock = await startMockServer({ host: '127.0.0.1', port: 0, delayMs: 0, cors: true }, routes, () => undefined)
+    const logs: MockLogEntry[] = []
+    mock = await startMockServer({ host: '127.0.0.1', port: 0, delayMs: 0, cors: true }, routes, (entry) => logs.push(entry))
     expect((await fetch(`${mock.url}/users/1`)).headers.get('access-control-allow-origin')).toBe('*')
     const pre = await fetch(`${mock.url}/users/1`, { method: 'OPTIONS', headers: { 'Access-Control-Request-Method': 'GET', Origin: 'http://localhost:5173' } })
     expect(pre.status).toBe(204)
@@ -64,6 +65,8 @@ describe('mock server', () => {
       http.get(`${mock!.url}/users/1`, { headers: { Host: 'evil.example:80' } }, (r) => resolve(r.statusCode!)),
     )
     expect(status).toBe(403)
+    expect(logs.map((entry) => entry.code)).toEqual([200, 204, 403])
+    expect(logs.at(-1)?.reason).toContain('Forbidden host')
   })
 
   it('LAN mocks accept IP addresses but not host names', async () => {

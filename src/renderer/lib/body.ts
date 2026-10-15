@@ -38,7 +38,7 @@ export function viewBody(bytes: Uint8Array, contentType = ''): BodyView {
   let text: string
   try {
     // stream:true tolerates a multi-byte character cut in half by truncation.
-    text = new TextDecoder('utf-8', { fatal: true }).decode(slice, { stream: truncated })
+    text = new TextDecoder(/charset\s*=\s*["']?([^;\s"']+)/i.exec(contentType)?.[1] ?? 'utf-8', { fatal: true }).decode(slice, { stream: truncated })
   } catch {
     return { kind: 'binary', size: bytes.length }
   }
@@ -56,5 +56,8 @@ export function formatBytes(n: number): string {
 /** Strips Electron's "Error invoking remote method 'x': Error:" prefix from IPC errors. */
 export function cleanError(e: unknown): string {
   const msg = e instanceof Error ? e.message : String(e)
-  return msg.replace(/^Error invoking remote method '[^']+': (\w*Error: )?/, '')
+  const cleaned = msg.replace(/^Error invoking remote method '[^']+': (\w*Error: )?/, '').replace(/; if the root CA is installed locally, try running Node.js with --use-system-ca/i, '')
+  if (/INCORRECT_PASSWORD/.test(cleaned)) return 'The client certificate passphrase is incorrect. Check it in Settings > Certificates.'
+  if (/ERR_UNSAFE_PORT/.test(cleaned)) return 'This port is blocked for token requests. Use a standard HTTP(S) port or change the token endpoint port.'
+  return cleaned
 }

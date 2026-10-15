@@ -1,8 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import { percentile, summarize, tickOf, type Sample } from '../../src/loadtest/metrics'
-import { profileSeries, vusAt } from '../../src/loadtest/profile'
+import { profileSeries, validateLoadProfile, vusAt } from '../../src/loadtest/profile'
 
 describe('load profiles', () => {
+  it('rejects fractional users and unbounded durations, and bounds preview points', () => {
+    expect(() => validateLoadProfile({ kind: 'fixed', vus: 2.5, durationSec: 10 })).toThrow(/whole number/)
+    expect(() => validateLoadProfile({ kind: 'fixed', vus: 2, durationSec: 100000 })).toThrow(/3600/)
+    expect(profileSeries({ kind: 'spike', vus: 10, durationSec: 3600 })).toHaveLength(120)
+  })
+
   it('fixed keeps all VUs for the whole run and stops at the end', () => {
     expect(profileSeries({ kind: 'fixed', vus: 10, durationSec: 5 })).toEqual([10, 10, 10, 10, 10])
     expect(vusAt({ kind: 'fixed', vus: 10, durationSec: 5 }, 5)).toBe(0)

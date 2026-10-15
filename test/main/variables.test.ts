@@ -35,6 +35,11 @@ const row = (key: string, initial: string, extra: Partial<VariableRow> = {}): Va
 })
 
 describe('initial vs current values', () => {
+  it('rejects duplicate names before changing saved values (QA VAR-2)', async () => {
+    await vars.write('globals', [row('a', 'original', { current: 'local' })])
+    await expect(vars.write('globals', [row('a', 'changed'), row('a', 'duplicate')])).rejects.toThrow('Duplicate variable name')
+    expect(await vars.read('globals')).toEqual([row('a', 'original', { current: 'local' })])
+  })
   it('keeps initial values in the file and current values in .pmlocal', async () => {
     const env = await createEnvironment(root, 'Dev')
     await vars.write(`env:${env}`, [row('base', 'http://dev'), row('user', 'alice', { current: 'bob' })])

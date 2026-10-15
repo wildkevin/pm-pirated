@@ -61,6 +61,14 @@ function substituteJson<T>(value: T, vars: Map<string, string>): T {
   return JSON.parse(substitute(JSON.stringify(value), escaped)) as T
 }
 
+const RAW_CONTENT_TYPE: Record<string, string> = {
+  json: 'application/json',
+  xml: 'application/xml',
+  html: 'text/html',
+  javascript: 'application/javascript',
+  text: 'text/plain',
+}
+
 export async function generateCode(
   item: PmItem,
   inheritedAuth: PmAuth | undefined,
@@ -73,10 +81,16 @@ export async function generateCode(
   const auth = resolved.request.auth ?? (inheritedAuth && substituteJson(inheritedAuth, vars))
   const withAuth = applyAuth(resolved, auth)
   const req = withAuth.request
+  if (item.protocolProfileBehavior?.disableBodyPruning === false && /^(GET|HEAD)$/i.test(req.method)) req.body = undefined
   const raw = rawUrl(req.url)
+  // The app sends raw bodies with a Content-Type for their language (postman-runtime adds it);
+  // snippets must too, or e.g. curl --data posts JSON as form data.
+  const rawLang = req.body?.mode === 'raw' && !(req.body as { disabled?: boolean }).disabled ? (req.body.options?.raw?.language ?? 'text') : null
+  const implied = rawLang ? RAW_CONTENT_TYPE[rawLang] : undefined
+  if (implied && !req.header.some((h) => !h.disabled && h.key.toLowerCase() === 'content-type')) req.header = [...req.header, { key: 'Content-Type', value: implied }]
   const request = new Request({
     ...req,
-    url: typeof req.url === 'string' ? raw : { ...Url.parse(raw), ...(req.url.variable ? { variable: req.url.variable } : {}), ...(req.url.query ? { query: req.url.query } : {}) },
+    url: typeof req.url === 'string' ? raw : { ...Url.parse(raw), ...(req.url.variable ? { variable: req.url.variable } : {}), query: Url.parse(raw).query },
     header: req.header.filter((h) => !h.disabled && h.key),
     ...(req.body && !(req.body as { disabled?: boolean }).disabled ? { body: req.body } : { body: undefined }),
   })

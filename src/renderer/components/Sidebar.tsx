@@ -311,6 +311,24 @@ function CollectionsTree({ workspace, activeId, renamingId, favorites, actions, 
           onKey={(e) => {
             const k = e.key.toLowerCase()
             if (renamingId) return
+            const row = e.currentTarget as HTMLElement
+            const visible = Array.from(row.closest('[role="tree"]')?.querySelectorAll<HTMLElement>('[role="treeitem"]') ?? [])
+            const index = visible.indexOf(row)
+            let target: HTMLElement | undefined
+            if (e.key === 'ArrowDown') target = visible[Math.min(visible.length - 1, index + 1)]
+            else if (e.key === 'ArrowUp') target = visible[Math.max(0, index - 1)]
+            else if (e.key === 'Home') target = visible[0]
+            else if (e.key === 'End') target = visible.at(-1)
+            else if (e.key === 'ArrowRight') {
+              if (node.children && !isOpen) toggle(node.id)
+              else if (node.children?.length) target = visible[index + 1]
+            } else if (e.key === 'ArrowLeft') {
+              if (node.children && isOpen) toggle(node.id)
+              else target = visible.slice(0, index).reverse().find((r) => Number(r.getAttribute('aria-level')) < depth + 1)
+            }
+            if (['ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) {
+              e.preventDefault(); e.stopPropagation(); target?.focus(); return
+            }
             if ((e.ctrlKey || e.metaKey) && k === 'e') actions.startRename(node.id)
             else if ((e.ctrlKey || e.metaKey) && k === 'd') actions.duplicate(node.id)
             else if (e.key === 'F2') actions.startRename(node.id)
@@ -370,6 +388,7 @@ function TreeRow({ node, depth, open, active, renaming, favorite, onOpen, onTogg
       role="treeitem"
       tabIndex={0}
       aria-selected={active}
+      aria-level={depth + 1}
       aria-expanded={node.kind === 'request' ? undefined : open}
       style={{ paddingLeft: 12 + depth * 12 }}
       // Single click: preview tab. Double click: keep the tab (Postman).
@@ -605,7 +624,9 @@ function HistoryList({ history, actions, filter }: ListProps) {
               </button>
               {isOpen &&
                 entries.map((h) => (
-                  <div key={h.id} className="tree-row history-row" data-testid="history-row" role="treeitem" tabIndex={0} onClick={() => actions.openHistory(h)} title={rawUrl(h.item.request.url)}>
+                  <div key={h.id} className="tree-row history-row" data-testid="history-row" role="treeitem" tabIndex={0} onClick={() => actions.openHistory(h)} onKeyDown={(e) => {
+                    if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); actions.openHistory(h) }
+                  }} title={rawUrl(h.item.request.url)}>
                     <span className={`tree-method ${methodClass(h.item.request.method)}`}>{methodLabel(h.item.request.method)}</span>
                     <span className="tree-name">{rawUrl(h.item.request.url) || h.name}</span>
                     <span className="tree-actions" onClick={(e) => e.stopPropagation()}>

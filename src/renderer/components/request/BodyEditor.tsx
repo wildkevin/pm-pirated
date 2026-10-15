@@ -1,3 +1,5 @@
+import { useState } from 'react'
+import { cleanError } from '../../lib/body'
 import type { BodyMode, PmBody, PmFormParam, PmKeyValue, RawLanguage } from '../../../shared/format/types'
 import { CodeEditor, type EditorLanguage } from '../common/CodeEditor'
 import { KeyValueTable } from '../common/ui'
@@ -48,23 +50,34 @@ function switchMode(body: PmBody | undefined, mode: BodyMode): PmBody {
 }
 
 function beautify(text: string, language: RawLanguage): string {
-  if (language === 'json') {
-    try {
-      return JSON.stringify(JSON.parse(text), null, 4)
-    } catch {
-      return text
-    }
+  if (language === 'json') return JSON.stringify(JSON.parse(text), null, 4)
+  if (language === 'xml' || language === 'html') {
+    if (language === 'xml' && new DOMParser().parseFromString(text, 'application/xml').querySelector('parsererror')) throw new Error('Invalid XML. Correct the markup before formatting.')
+    let depth = 0
+    return text.replace(/>\s*</g, '>\n<').split('\n').map(line => {
+      const value = line.trim()
+      if (/^<\//.test(value)) depth = Math.max(0, depth - 1)
+      const formatted = '    '.repeat(depth) + value
+      if (/^<[^!?/][^>]*>/.test(value) && !/\/>$/.test(value) && !/<\//.test(value) && !/^<(?:area|base|br|col|embed|hr|img|input|link|meta|param|source|track|wbr)\b/i.test(value)) depth++
+      return formatted
+    }).join('\n')
   }
   return text
 }
 
 interface Props {
+  allowFilesOutsideWorkingDir?: boolean
   body: PmBody | undefined
   onChange(body: PmBody | undefined): void
   pickFile(): Promise<string | null>
 }
 
-export function BodyEditor({ body, onChange, pickFile }: Props) {
+export function BodyEditor({ body, onChange, pickFile, allowFilesOutsideWorkingDir = false }: Props) {
+  const [error, setError] = useState('')
+  let graphqlError = ''
+  if (body?.mode === 'graphql' && body.graphql.variables?.trim() && !body.graphql.variables.includes('{{')) {
+    try { const value = JSON.parse(body.graphql.variables); if (!value || Array.isArray(value) || typeof value !== 'object') graphqlError = 'GraphQL variables must be a JSON object.' } catch { graphqlError = 'Invalid JSON in GraphQL variables. Correct it before sending.' }
+  }
   // Postman keeps the body object (with content of other modes) when "none" is chosen: `disabled` marks it.
   const disabled = !!(body as { disabled?: boolean } | undefined)?.disabled
   const mode: BodyMode | 'none' = !body || disabled ? 'none' : body.mode
@@ -108,13 +121,15 @@ export function BodyEditor({ body, onChange, pickFile }: Props) {
               ))}
             </select>
             <span className="spacer" />
-            <button className="link-btn" onClick={() => onChange({ ...body, raw: beautify(body.raw, language) })}>
+            <button className="link-btn" onClick={() => { try { onChange({ ...body, raw: beautify(body.raw, language) }); setError('') } catch (e) { setError(`Could not format body: ${cleanError(e)}`) } }}>
               Beautify
             </button>
           </>
         )}
       </div>
 
+      {(error || graphqlError) && <div role="alert" className="notice">{error || graphqlError}</div>}
+      {!allowFilesOutsideWorkingDir && (mode === 'file' || mode === 'formdata') && <div className="notice">Files must be inside the workspace folder. A blocked or missing file stops the request. To use other files, enable Settings &gt; General &gt; Allow reading files outside working directory.</div>}
       {mode === 'none' && <div className="muted-note">This request does not have a body</div>}
       {body && !disabled && body.mode === 'raw' && (
         <CodeEditor ariaLabel="Request body" language={language as EditorLanguage} value={body.raw} onChange={(raw) => onChange({ ...body, raw })} />

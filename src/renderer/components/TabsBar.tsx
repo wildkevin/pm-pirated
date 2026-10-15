@@ -40,7 +40,18 @@ export function TabsBar(p: Props) {
   const strip = useRef<HTMLDivElement>(null)
   // Braces matter: scrollIntoView returns a Promise in current Chromium, and React would call it as a cleanup.
   useEffect(() => {
-    strip.current?.querySelector('.tab.active')?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+    const reveal = () => {
+      const tabs = strip.current
+      const active = tabs?.querySelector<HTMLElement>('.tab.active')
+      if (!tabs || !active) return
+      const left = active.offsetLeft - tabs.offsetLeft
+      if (left < tabs.scrollLeft) tabs.scrollLeft = left
+      else if (left + active.offsetWidth > tabs.scrollLeft + tabs.clientWidth) tabs.scrollLeft = left + active.offsetWidth - tabs.clientWidth
+    }
+    reveal()
+    const observer = new ResizeObserver(reveal)
+    if (strip.current) observer.observe(strip.current)
+    return () => observer.disconnect()
   }, [p.activeKey, p.tabs.length])
   const menuItems = (key: string) => {
     const i = p.tabs.findIndex((t) => t.key === key)
@@ -92,10 +103,10 @@ export function TabsBar(p: Props) {
             </div>
           )
         })}
-        <button className="btn-icon tab-new" aria-label="New request tab" title="New request" onClick={p.onNew}>
-          <Plus size={16} />
-        </button>
       </div>
+      <button className="btn-icon tab-new" aria-label="New request tab" title="New request" onClick={p.onNew}>
+        <Plus size={16} />
+      </button>
       {menu && <Menu style={{ left: menu.x, top: menu.y }} onClose={() => setMenu(null)} items={menuItems(menu.key)} />}
       <button className="btn-icon tabs-list-btn" aria-label="Open tabs" title="Open tabs" disabled={!p.tabs.length} onClick={(e) => setList(e.currentTarget.getBoundingClientRect())}>
         <ChevronDown size={14} />

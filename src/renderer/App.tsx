@@ -27,6 +27,7 @@ import { TabsBar } from './components/TabsBar'
 import { VariablesEditor } from './components/VariablesEditor'
 import { activeTab, initialState, isDirty, newDraft, reducer, tabTitle, toUiState, type Action, type Tab, type TabDoc } from './state'
 import { AppHeader, type SearchHit } from './components/AppHeader'
+import { Modal } from './components/common/ui'
 import { CreateWorkspacePage, WorkspacesPage } from './components/WorkspacePages'
 
 let seq = 0
@@ -72,11 +73,22 @@ export function App() {
   const [resolved, setResolved] = useState<ResolvedVariable[]>([])
   const [consoleOpen, setConsoleOpen] = useState(false)
   const [consoleEntries, setConsoleEntries] = useState<ConsoleEntry[]>([])
+  const [closing, setClosing] = useState<string[]>([])
+  const requestSplit = useRef<number[] | undefined>(undefined)
+  const [notice, setNotice] = useState<string | null>(null)
+  const [overlayPanel, setOverlayPanel] = useState<'left' | 'right' | null>(null)
+  const [viewportWidth, setViewportWidth] = useState(window.innerWidth)
+  useEffect(() => {
+    const resize = () => { setViewportWidth(window.innerWidth); setOverlayPanel(null) }
+    window.addEventListener('resize', resize)
+    return () => window.removeEventListener('resize', resize)
+  }, [])
   const [modal, setModal] = useState<ModalState>(null)
   // Postman 12's right panel (Variables / Code / Info); open by default, remembered.
   const [rightOpen, setRightOpen] = useState(() => localStorage.getItem('pm-local.right') !== 'hidden')
   const [rightView, setRightView] = useState<RightView>('variables')
   const showRight = (open: boolean, view?: RightView) => {
+    if (viewportWidth < 950) { setOverlayPanel(open ? 'right' : null); if (view) setRightView(view); return }
     localStorage.setItem('pm-local.right', open ? 'shown' : 'hidden')
     setRightOpen(open)
     if (view) setRightView(view)
@@ -92,16 +104,29 @@ export function App() {
   const navJump = useRef(false)
   // Hide the sidebar for more room on small screens or at high zoom (Postman: Ctrl+\).
   const [sidebarOpen, setSidebarOpen] = useState(() => localStorage.getItem('pm-local.sidebar') !== 'hidden')
-  const toggleSidebar = () =>
+  const toggleSidebar = () => {
+    if (viewportWidth < 750) { setOverlayPanel((p) => p === 'left' ? null : 'left'); return }
     setSidebarOpen((open) => {
       localStorage.setItem('pm-local.sidebar', open ? 'hidden' : 'shown')
       return !open
     })
+  }
   const [mocks, setMocks] = useState<MockInfo[]>([])
   const [mockLogs, setMockLogs] = useState<Record<string, MockLogEntry[]>>({})
   const [capture, setCapture] = useState<CaptureState | null>(null)
   const [captured, setCaptured] = useState<CapturedExchange[]>([])
   const restoredRoot = useRef<string | null>(null)
+  const transitionTask = useRef<Promise<unknown>>(Promise.resolve())
+  const restoreTask = useRef<Promise<unknown>>(Promise.resolve())
+  const persistTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const switching = useRef(false)
+  const flushWorkspace = async () => {
+    await chain.current
+    await restoreTask.current
+    if (persistTimer.current) clearTimeout(persistTimer.current)
+    if (stateRef.current.workspace && restoredRoot.current === stateRef.current.workspace.root)
+      await window.api.saveUiState(toUiState(stateRef.current))
+  }
 
   const fail = useCallback((e: unknown) => dispatch({ type: 'error', error: cleanError(e) }), [])
   const run = useCallback(
@@ -120,28 +145,41 @@ export function App() {
   useEffect(() => {
     void run(async () => {
       setSettings(await window.api.getSettings())
-      dispatch({ type: 'workspace', workspace: await window.api.currentWorkspace() })
+      const workspace = await window.api.currentWorkspace()
+      act({ type: 'workspace', workspace })
+      const recent = await window.api.listWorkspaces()
+      setWorkspaces(recent)
+      if (!workspace && recent.length) {
+        setPage('workspaces')
+        setNotice('Your last workspace folder is unavailable. Open another workspace or choose its new location.')
+      }
     })
   }, [run])
 
   const root = state.workspace?.root
   useEffect(() => {
     if (!root || restoredRoot.current === root) return
-    void run(async () => {
-      dispatch({ type: 'restore', ui: await window.api.readUiState() })
-      setHistory(await window.api.listHistory())
-      setMocks(await window.api.listMocks())
+    restoreTask.current = run(async () => {
+      const ui = await window.api.readUiState()
+      const [history, mocks] = await Promise.all([window.api.listHistory(), window.api.listMocks()])
+      if (stateRef.current.workspace?.root !== root) return
+      restoredRoot.current = root
+      setHistory(history)
+      setMocks(mocks)
       setMockLogs({})
       setConsoleEntries([])
-      restoredRoot.current = root
+      act({ type: 'restore', ui })
     })
   }, [root, run])
 
   useEffect(() => {
-    if (!root || restoredRoot.current !== root) return
-    const t = setTimeout(() => void window.api.saveUiState(toUiState(stateRef.current)).catch(() => undefined), 400)
-    return () => clearTimeout(t)
-  }, [root, state.tabs, state.activeKey, state.activeEnvironment])
+    if (!root || restoredRoot.current !== root || switching.current) return
+    persistTimer.current = setTimeout(() => {
+      persistTimer.current = null
+      if (!switching.current) void window.api.saveUiState(toUiState(stateRef.current)).catch(fail)
+    }, 400)
+    return () => { if (persistTimer.current) clearTimeout(persistTimer.current) }
+  }, [root, state.tabs, state.activeKey, state.activeEnvironment, state.favorites, fail])
 
   useEffect(
     () =>
@@ -167,8 +205,7 @@ export function App() {
   useEffect(() => {
     window.api.onBeforeClose(() => {
       const done = () => window.api.closeReady()
-      if (!restoredRoot.current) return done()
-      window.api.saveUiState(toUiState(stateRef.current)).then(done, done)
+      void transitionTask.current.then(() => flushWorkspace()).then(done, done)
     })
   }, [])
 
@@ -181,6 +218,7 @@ export function App() {
   }, [state.activeKey])
   const live = (keys: string[]) => keys.filter((k) => state.tabs.some((t) => t.key === k) && k !== state.activeKey)
   const navigate = (dir: 'back' | 'forward') => {
+    if (page && dir === 'back') { setPage(null); return }
     const from = live(nav[dir])
     const target = from.at(-1)
     if (!target) return
@@ -206,16 +244,24 @@ export function App() {
   const refreshWorkspace = () => run(async () => dispatch({ type: 'workspace', workspace: await window.api.refreshWorkspace() }))
 
   // --- opening tabs ---
-  const switchWorkspace = (open: () => Promise<import('../shared/format/types').WorkspaceInfo | null>) =>
-    run(async () => {
-      const workspace = await open()
-      if (workspace) {
-        dispatch({ type: 'workspace', workspace })
-        setPage(null)
-      }
+  const switchWorkspace = (open: () => Promise<import('../shared/format/types').WorkspaceInfo | null>) => {
+    if (switching.current) return transitionTask.current
+    switching.current = true
+    const task = run(async () => {
+      try {
+        await flushWorkspace()
+        const workspace = await open()
+        if (workspace) {
+          act({ type: 'workspace', workspace })
+          setPage(null)
+        }
+      } finally { switching.current = false }
       setSettings(await window.api.getSettings()) // recent workspaces changed
       void refreshWorkspaces()
     })
+    transitionTask.current = task
+    return task
+  }
   const openWorkspace = () => switchWorkspace(() => window.api.openWorkspaceDialog())
   /** `preview`: single click in the sidebar — reuse the preview tab (Postman). */
   const openRequest = (id: string, preview = false) =>
@@ -261,11 +307,15 @@ export function App() {
           }
           act({ type: 'saved', key: tab.key, doc })
           act({ type: 'workspace', workspace })
+        } else if (doc.kind === 'mock' && doc.draft) {
+          setMocks(await window.api.saveMock(tab.id!, doc.draft))
+          act({ type: 'saved', key: tab.key, doc })
         } else if (doc.kind === 'variables') {
           await window.api.saveVariables(tab.id!, doc.rows)
           act({ type: 'saved', key: tab.key, doc })
         }
         refreshResolved()
+        return true
       }),
     )
 
@@ -311,19 +361,31 @@ export function App() {
     if (tab.sendId) void window.api.cancelRequest(tab.sendId)
   }
 
-  const close = (tab: Tab) => {
-    if (isDirty(tab) && !window.confirm(`"${tabTitle(tab)}" has unsaved changes. Close without saving?`)) return
-    dispatch({ type: 'close', key: tab.key })
-  }
-
-  /** Context-menu closes: one confirmation for all unsaved tabs among them. */
   const closeMany = (tabs: Tab[]) => {
-    const dirty = tabs.filter(isDirty)
-    if (dirty.length && !window.confirm(`${dirty.length} tab${dirty.length > 1 ? 's have' : ' has'} unsaved changes. Close without saving?`)) return
-    dispatch({ type: 'closeMany', keys: tabs.map((t) => t.key) })
+    if (tabs.some(isDirty)) { setClosing(tabs.map((t) => t.key)); return }
+    act({ type: 'closeMany', keys: tabs.map((t) => t.key) })
   }
-
-  const newRequestTab = () => dispatch({ type: 'openDraft', item: newDraft() })
+  const close = (tab: Tab) => closeMany([tab])
+  const saveAndClose = async (keys = closing) => {
+    for (const key of keys) {
+      const tab = stateRef.current.tabs.find((t) => t.key === key)
+      if (tab && isDirty(tab)) {
+        if (tab.doc.kind === 'request' && tab.id === null) {
+          setModal({ kind: 'save', key })
+          return // Save As completes this close operation; cancel keeps the draft.
+        }
+        if (!(await save(tab))) return
+      }
+    }
+    act({ type: 'closeMany', keys })
+    setClosing([])
+  }
+  const newRequestTab = () => {
+    if (restoredRoot.current !== stateRef.current.workspace?.root) return
+    setPage(null)
+    act({ type: 'openDraft', item: newDraft() })
+    requestAnimationFrame(() => document.querySelector<HTMLElement>('[aria-label="Request URL"]')?.focus())
+  }
 
   /** "Get New Access Token": resolves {{variables}} in the config, runs the flow, stores the token. */
   const getOAuth2Token = (apply: (auth: PmAuth) => void) => async (auth: PmAuth) => {
@@ -343,7 +405,9 @@ export function App() {
   // --- keyboard shortcuts (Postman's) ---
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (!(e.ctrlKey || e.metaKey) || !stateRef.current.workspace || modal) return
+      if (e.key === 'Escape' && overlayPanel) { setOverlayPanel(null); return }
+      if (e.key === 'Escape' && page && stateRef.current.workspace && !modal) { setPage(null); return }
+      if (!(e.ctrlKey || e.metaKey) || !stateRef.current.workspace || modal || closing.length) return
       const tab = activeTab(stateRef.current)
       const k = e.key.toLowerCase()
       if (k === 's' && tab) {
@@ -476,7 +540,7 @@ export function App() {
     openMock: (id, name) => {
       const open = stateRef.current.tabs.find((t) => t.id === id)
       if (open) dispatch({ type: 'activate', key: open.key })
-      else dispatch({ type: 'open', id, doc: { kind: 'mock', title: name } })
+      else dispatch({ type: 'open', id, doc: { kind: 'mock', title: name, draft: mocks.find((m) => m.id === id)?.def } })
     },
     createMock: (target) => setModal({ kind: 'mock', target }),
     startMock: (id) => void run(() => window.api.startMock(id)),
@@ -504,7 +568,7 @@ export function App() {
   const pasteCurl = (tab: Tab) => (text: string) =>
     void run(async () => {
       const r = await window.api.importText(text)
-      if (r.item) dispatch({ type: 'edit', key: tab.key, patch: { method: r.item.request.method, url: r.item.request.url, header: r.item.request.header, body: r.item.request.body } })
+      if (r.item) dispatch({ type: 'edit', key: tab.key, patch: { method: r.item.request.method, url: r.item.request.url, header: r.item.request.header, body: r.item.request.body, auth: r.item.request.auth } })
     })
 
   const saveExample = (tab: Tab) => {
@@ -520,7 +584,8 @@ export function App() {
       body: view.kind === 'text' ? view.text : '',
       ...(view.kind === 'text' ? { _postman_previewlanguage: view.language } : {}),
     }
-    dispatch({ type: 'editItem', key: tab.key, patch: { response: [...(tab.doc.item.response ?? []), example] } })
+    act({ type: 'editItem', key: tab.key, patch: { response: [...(tab.doc.item.response ?? []), example] } })
+    void save(tab).then((saved) => { if (saved) setNotice('Example saved. View it in the response Examples menu.') })
   }
 
   const content = () => {
@@ -570,9 +635,13 @@ export function App() {
           info={mocks.find((m) => m.id === active.id)}
           workspace={state.workspace!}
           logs={mockLogs[active.id!] ?? []}
+          draft={doc.draft}
+          onDraftChange={(draft) => act({ type: 'setMockDraft', key: active.key, draft })}
           onSave={async (def) => {
             setMocks(await window.api.saveMock(active.id!, def))
-            dispatch({ type: 'setDoc', key: active.key, doc: { kind: 'mock', title: def.name } })
+            const doc: TabDoc = { kind: 'mock', title: def.name, draft: def }
+            act({ type: 'setDoc', key: active.key, doc })
+            act({ type: 'saved', key: active.key, doc })
           }}
           onStart={() => void run(() => window.api.startMock(active.id!))}
           onStop={() => void run(() => window.api.stopMock(active.id!))}
@@ -597,7 +666,7 @@ export function App() {
       return (
         <div className="request-area">
         <div className="request-main">
-        <Allotment vertical key={active.key}>
+        <Allotment vertical defaultSizes={requestSplit.current} onDragEnd={(sizes) => { requestSplit.current = sizes }}>
           <Allotment.Pane minSize={180} preferredSize="55%">
             <RequestEditor
               tab={active}
@@ -622,11 +691,12 @@ export function App() {
               report={active.report}
               sending={!!active.sendId}
               onCancel={() => cancel(active)}
-              onSaveBody={() => {
-                const res = active.report?.response
+              onSaveBody={(shownReport) => {
+                const res = shownReport.response
                 if (res?.ok) void run(() => window.api.saveResponseBody(doc.item.name || 'response', res.body))
               }}
               onSaveExample={() => saveExample(active)}
+              examples={doc.item.response ?? []}
               past={active.past ?? []}
               onShowPast={(index) => dispatch({ type: 'showReport', key: active.key, index })}
               onClear={() => dispatch({ type: 'clearReport', key: active.key })}
@@ -671,6 +741,45 @@ export function App() {
     )
   }
 
+  const sidebar = state.workspace ? (
+                  <Sidebar
+                    workspace={state.workspace!}
+                    panel={panel}
+                    setPanel={setPanel}
+                    activeId={active?.id ?? null}
+                    renamingId={renamingId}
+                    activeEnvironment={state.activeEnvironment}
+                    favorites={state.favorites}
+                    history={history}
+                    mocks={mocks}
+                    actions={actions}
+                  />
+  ) : null
+
+  const rightPanel = state.workspace ? (
+                  <RightPanel
+                    view={rightView}
+                    setView={setRightView}
+                    onClose={() => showRight(false)}
+                    active={active}
+                    resolved={resolved}
+                    environmentId={state.activeEnvironment}
+                    environmentName={state.workspace!.environments.find((e) => e.id === state.activeEnvironment)?.name ?? null}
+                    onEdit={(scope) => {
+                      const ws = state.workspace!
+                      if (scope === 'globals') return void openVariables('globals', 'Globals')
+                      if (scope === 'environment') {
+                        const env = ws.environments.find((e) => e.id === state.activeEnvironment)
+                        return void (env && openVariables(`env:${env.id}`, env.name))
+                      }
+                      const col = active?.id?.startsWith('collections/') ? active.id.split('/').slice(0, 2).join('/') : null
+                      if (col) void openContainer(col)
+                    }}
+                  />
+  ) : null
+
+  const sidebarVisible = viewportWidth < 750 ? overlayPanel === 'left' : sidebarOpen
+  const rightVisible = viewportWidth < 950 ? overlayPanel === 'right' : rightOpen
   const modalTab = modal?.kind === 'save' ? state.tabs.find((t) => t.key === modal.key) : undefined
 
   return (
@@ -685,7 +794,7 @@ export function App() {
           void refreshWorkspaces()
           setPage('workspaces')
         }}
-        canBack={live(nav.back).length > 0}
+        canBack={(!!page && !!state.workspace) || live(nav.back).length > 0}
         canForward={live(nav.forward).length > 0}
         onBack={() => navigate('back')}
         onForward={() => navigate('forward')}
@@ -700,7 +809,9 @@ export function App() {
         }}
       />
 
-      {page === 'workspaces' ? (
+      {state.workspace && restoredRoot.current !== root ? (
+        <div className="empty-state" role="status">Opening workspace…</div>
+      ) : page === 'workspaces' ? (
         <WorkspacesPage
           current={state.workspace?.root ?? null}
           workspaces={workspaces}
@@ -710,10 +821,20 @@ export function App() {
         />
       ) : page === 'create' || !state.workspace ? (
         <CreateWorkspacePage
+          createWorkspace={(input) => {
+            if (switching.current) return Promise.reject(new Error('A workspace is already opening. Please wait.'))
+            switching.current = true
+            const task = (async () => {
+              try { await flushWorkspace(); return await window.api.createWorkspace(input) }
+              finally { switching.current = false }
+            })()
+            transitionTask.current = task
+            return task
+          }}
           onCancel={state.workspace ? () => setPage(null) : undefined}
           onOpenExisting={() => void openWorkspace()}
           onCreated={(workspace) => {
-            dispatch({ type: 'workspace', workspace })
+            act({ type: 'workspace', workspace })
             setPage(null)
             void refreshWorkspaces()
             void window.api.getSettings().then(setSettings)
@@ -721,22 +842,9 @@ export function App() {
         />
       ) : state.workspace ? (
         <div className="main">
-          <Allotment vertical proportionalLayout={false}>
-            <Allotment.Pane>
               <Allotment proportionalLayout={false}>
-                <Allotment.Pane preferredSize={340} minSize={240} maxSize={640} visible={sidebarOpen}>
-                  <Sidebar
-                    workspace={state.workspace}
-                    panel={panel}
-                    setPanel={setPanel}
-                    activeId={active?.id ?? null}
-                    renamingId={renamingId}
-                    activeEnvironment={state.activeEnvironment}
-                    favorites={state.favorites}
-                    history={history}
-                    mocks={mocks}
-                    actions={actions}
-                  />
+                <Allotment.Pane preferredSize={240} minSize={180} maxSize={Math.max(180, Math.min(320, viewportWidth * 0.25))} visible={sidebarOpen && viewportWidth >= 750}>
+                  {sidebar}
                 </Allotment.Pane>
                 <Allotment.Pane>
                   <div className="workbench">
@@ -751,43 +859,27 @@ export function App() {
                       environments={state.workspace.environments}
                       activeEnvironment={state.activeEnvironment}
                       onEnvironment={(id) => dispatch({ type: 'environment', id })}
-                      onShowVariables={() => showRight(!(rightOpen && rightView === 'variables'), 'variables')}
+                      onShowVariables={() => showRight(viewportWidth < 950 ? overlayPanel !== 'right' : !(rightOpen && rightView === 'variables'), 'variables')}
                     />
-                    <div className="workbench-content">{content()}</div>
+                    <div className="workbench-content">
+                      <Allotment vertical proportionalLayout={false}>
+                        <Allotment.Pane><div className="workbench-page">{content()}</div></Allotment.Pane>
+                        <Allotment.Pane visible={consoleOpen} preferredSize={260} minSize={120}>
+                          <Console entries={consoleEntries} onClear={() => setConsoleEntries([])} onClose={() => setConsoleOpen(false)} />
+                        </Allotment.Pane>
+                      </Allotment>
+                    </div>
                   </div>
                 </Allotment.Pane>
-                <Allotment.Pane preferredSize={300} minSize={220} maxSize={640} visible={rightOpen}>
-                  <RightPanel
-                    view={rightView}
-                    setView={setRightView}
-                    onClose={() => showRight(false)}
-                    active={active}
-                    resolved={resolved}
-                    environmentId={state.activeEnvironment}
-                    environmentName={state.workspace.environments.find((e) => e.id === state.activeEnvironment)?.name ?? null}
-                    onEdit={(scope) => {
-                      const ws = state.workspace!
-                      if (scope === 'globals') return void openVariables('globals', 'Globals')
-                      if (scope === 'environment') {
-                        const env = ws.environments.find((e) => e.id === state.activeEnvironment)
-                        return void (env && openVariables(`env:${env.id}`, env.name))
-                      }
-                      const col = active?.id?.startsWith('collections/') ? active.id.split('/').slice(0, 2).join('/') : null
-                      if (col) void openContainer(col)
-                    }}
-                  />
+                <Allotment.Pane preferredSize={220} minSize={180} maxSize={Math.max(180, Math.min(300, viewportWidth * 0.24))} visible={rightOpen && viewportWidth >= 950}>
+                  {rightPanel}
                 </Allotment.Pane>
               </Allotment>
-            </Allotment.Pane>
-            <Allotment.Pane visible={consoleOpen} preferredSize={260} minSize={120}>
-              <Console entries={consoleEntries} onClear={() => setConsoleEntries([])} onClose={() => setConsoleOpen(false)} />
-            </Allotment.Pane>
-          </Allotment>
         </div>
       ) : null}
 
       <footer className="status-bar">
-        <button className={`status-btn${sidebarOpen ? '' : ' active'}`} aria-label={sidebarOpen ? 'Hide sidebar' : 'Show sidebar'} title="Toggle sidebar (Ctrl+\\)" disabled={!state.workspace} onClick={toggleSidebar}>
+        <button className={`status-btn${sidebarVisible ? '' : ' active'}`} aria-label={sidebarVisible ? 'Hide sidebar' : 'Show sidebar'} title="Toggle sidebar (Ctrl+\\)" disabled={!state.workspace} onClick={toggleSidebar}>
           <PanelLeft size={12} />
         </button>
         <button className={`status-btn${consoleOpen ? ' active' : ''}`} onClick={() => setConsoleOpen(!consoleOpen)} disabled={!state.workspace}>
@@ -819,7 +911,7 @@ export function App() {
         <button className="status-btn" disabled={!state.workspace} onClick={() => setModal({ kind: 'cookies' })}>
           <Cookie size={12} /> Cookies
         </button>
-        <button className={`status-btn${rightOpen ? ' active' : ''}`} aria-label={rightOpen ? 'Hide right panel' : 'Show right panel'} title="Toggle right panel" disabled={!state.workspace} onClick={() => showRight(!rightOpen)}>
+        <button className={`status-btn${rightVisible ? ' active' : ''}`} aria-label={rightVisible ? 'Hide right panel' : 'Show right panel'} title="Toggle right panel" disabled={!state.workspace} onClick={() => showRight(viewportWidth < 950 ? overlayPanel !== 'right' : !rightOpen)}>
           <PanelRight size={12} />
         </button>
       </footer>
@@ -839,7 +931,7 @@ export function App() {
             setMocks(created.mocks)
             setModal(null)
             setPanel('mocks')
-            dispatch({ type: 'open', id: created.id, doc: { kind: 'mock', title: def.name } })
+            dispatch({ type: 'open', id: created.id, doc: { kind: 'mock', title: def.name, draft: def } })
           }}
         />
       )}
@@ -857,13 +949,31 @@ export function App() {
           onSave={async (parentId, name) => {
             const item: PmItem = { ...(modalTab.doc as { item: PmItem }).item, name }
             const { workspace, id } = await window.api.createRequest(parentId, name, item)
-            dispatch({ type: 'saved', key: modalTab.key, doc: { kind: 'request', item }, id })
+            act({ type: 'saved', key: modalTab.key, doc: { kind: 'request', item }, id })
             dispatch({ type: 'workspace', workspace })
             setModal(null)
             refreshResolved()
+            if (closing.includes(modalTab.key)) {
+              act({ type: 'close', key: modalTab.key })
+              const remaining = closing.filter((key) => key !== modalTab.key)
+              setClosing(remaining)
+              void saveAndClose(remaining)
+            }
           }}
         />
       )}
+
+      {overlayPanel && state.workspace && <div className="panel-overlay-backdrop" onClick={() => setOverlayPanel(null)}><div className={`panel-overlay ${overlayPanel}`} onClick={(e) => e.stopPropagation()}>{overlayPanel === 'left' ? sidebar : rightPanel}</div></div>}
+      {closing.length > 0 && !modal && (
+        <Modal title="Save changes?" onClose={() => setClosing([])} footer={<>
+          <button className="btn btn-secondary" onClick={() => setClosing([])}>Cancel</button>
+          <button className="btn btn-secondary" onClick={() => { act({ type: 'closeMany', keys: closing }); setClosing([]) }}>Don't save</button>
+          <button className="btn btn-brand" onClick={() => void saveAndClose()}>Save</button>
+        </>}>
+          <p>{state.tabs.filter((t) => closing.includes(t.key) && isDirty(t)).map(tabTitle).join(', ')} has unsaved changes.</p>
+        </Modal>
+      )}
+      {notice && <div className="toast" role="status"><span>{notice}</span><button className="btn-icon" aria-label="Dismiss notification" onClick={() => setNotice(null)}>×</button></div>}
 
       {state.error && (
         <div className="toast" role="alert">

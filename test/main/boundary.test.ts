@@ -57,3 +57,21 @@ describe('keyboard zoom', () => {
     expect(nextZoom(0, 'a')).toBeNull()
   })
 })
+
+describe('renderer menu and permissions', () => {
+  it('permits only trusted renderer clipboard writes', async () => {
+    const { allowRendererPermission } = await import('../../src/main/window')
+    const loc = { file: '/app/index.html' }
+    const own = pathToFileURL(loc.file).href
+    expect(allowRendererPermission('clipboard-sanitized-write', own, own, loc)).toBe(true)
+    expect(allowRendererPermission('clipboard-read', own, own, loc)).toBe(false)
+    expect(allowRendererPermission('clipboard-sanitized-write', 'https://evil.test', own, loc)).toBe(false)
+    expect(allowRendererPermission('clipboard-sanitized-write', own, 'https://evil.test', loc)).toBe(false)
+  })
+  it('production menus have no conflicting close or reload actions', async () => {
+    const { applicationMenuTemplate } = await import('../../src/main/window')
+    const menu = JSON.stringify(applicationMenuTemplate('darwin', false))
+    expect(menu).toContain('PM Local')
+    for (const role of ['close', 'reload', 'forceReload', 'toggleDevTools']) expect(menu).not.toContain(`"${role}"`)
+  })
+})
