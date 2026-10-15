@@ -11,6 +11,8 @@ export interface MockDefinition {
   allowLan: boolean
   delayMs: number
   autoStart: boolean
+  /** Opt-in: let web pages in a browser call the mock (CORS). */
+  cors?: boolean
 }
 
 export interface MockRoute {
@@ -149,3 +151,21 @@ export function matchRoute(routes: MockRoute[], req: IncomingRequest): MatchResu
   const best = scored[0].r
   return { route: best, reason: `Matched "${best.exampleName}" of ${best.requestName}` }
 }
+
+export interface MockInfo {
+  /** `mocks/<file>.mock.json` */
+  id: string
+  def: MockDefinition
+  status: MockStatus
+}
+
+export type MockEvent = { id: string; log: MockLogEntry } | { id: string; status: MockStatus }
+
+// Messages between main and the mock-server process.
+export type MockMethods = {
+  start: { params: { id: string; host: string; port: number; delayMs: number; cors: boolean; routes: MockRoute[] }; result: { url: string } }
+  stop: { params: { id: string }; result: void }
+  setRoutes: { params: { id: string; routes: MockRoute[] }; result: void }
+}
+export type ToMocks = { type: 'call'; id: string; method: keyof MockMethods; params: unknown }
+export type FromMocks = { type: 'reply'; id: string; result?: unknown; error?: string } | { type: 'log'; mockId: string; entry: MockLogEntry }

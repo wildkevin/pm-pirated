@@ -65,14 +65,20 @@ const MASK = '••••••'
 
 /** Masks credential headers and every occurrence of the given secret values (≥ 4 chars). */
 export function redactRecord(record: RunRecord, secrets: string[]): RunRecord {
-  const values = [...new Set(secrets.filter((s) => s.length >= 4))].sort((a, b) => b.length - a.length)
+  const plain = secrets.filter((s) => s.length >= 4)
+  // Also the URL-encoded forms, as they appear in query strings and form bodies.
+  const values = [...new Set([...plain, ...plain.map(encodeURIComponent)])].sort((a, b) => b.length - a.length)
   const mask = (text: string) => values.reduce((t, v) => t.split(v).join(MASK), text)
   const headers = (list: { key: string; value: string }[]) => list.map((h) => ({ key: h.key, value: SENSITIVE_HEADERS.test(h.key) ? MASK : mask(h.value) }))
   return {
     ...record,
+    ...(record.error ? { error: mask(record.error) } : {}),
     results: record.results.map((r) => ({
       ...r,
       url: mask(r.url),
+      ...(r.error ? { error: mask(r.error) } : {}),
+      tests: r.tests.map((t) => ({ ...t, name: mask(t.name), ...(t.error ? { error: mask(t.error) } : {}) })),
+      scriptErrors: r.scriptErrors.map(mask),
       logs: r.logs.map((l) => ({ ...l, args: l.args.map(mask) })),
       ...(r.sent ? { sent: { ...r.sent, url: mask(r.sent.url), headers: headers(r.sent.headers), ...(r.sent.body !== undefined ? { body: mask(r.sent.body) } : {}) } } : {}),
       ...(r.response ? { response: { headers: headers(r.response.headers), body: mask(r.response.body) } } : {}),

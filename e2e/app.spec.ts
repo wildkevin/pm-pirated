@@ -267,3 +267,44 @@ test('collection runner with a CSV data file, and the code snippet panel', async
   await expect(page.getByText('Past runs')).toBeVisible()
   await app.close()
 })
+
+test('mock server answers with a saved example', async () => {
+  const net = await import('node:net')
+  const port = await new Promise<number>((r) => {
+    const s = net.createServer().listen(0, '127.0.0.1', () => {
+      const p = (s.address() as AddressInfo).port
+      s.close(() => r(p))
+    })
+  })
+  const app = await launch(await temp('pml-ud-'))
+  const page = await app.firstWindow()
+  await stubDialogs(app, await temp('pml-ws-'))
+  await openWorkspace(page)
+  await newCollectionWithRequest(page, 'Shop', 'Get product')
+  await urlBar(page).fill(`${base}/products/7`)
+  await page.getByRole('button', { name: 'Send', exact: true }).click()
+  await expect(page.getByTestId('response-status')).toHaveText('200 OK')
+  await page.getByRole('button', { name: 'Save as example' }).click()
+  await page.keyboard.press('ControlOrMeta+s')
+  await expect(page.getByLabel('Unsaved changes')).toHaveCount(0)
+
+  await page.getByRole('button', { name: 'Actions for Shop' }).click()
+  await page.getByRole('menuitem', { name: 'Mock', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: 'Create mock server' })
+  await dialog.getByLabel('Name').fill('Shop mock')
+  await dialog.getByLabel('Port').fill(String(port))
+  await dialog.getByRole('button', { name: 'Create Mock Server' }).click()
+  await page.getByRole('button', { name: 'Start' }).click()
+  await expect(page.getByTestId('mock-url')).toHaveText(`http://127.0.0.1:${port}`)
+  await expect(page.getByText('Examples served (1)')).toBeVisible()
+
+  // Call the mock from a new request tab.
+  await page.getByRole('button', { name: 'New request tab' }).click()
+  await urlBar(page).fill(`http://127.0.0.1:${port}/products/7`)
+  await page.getByRole('button', { name: 'Send', exact: true }).click()
+  await expect(page.getByTestId('response-body')).toContainText('"url": "/products/7"')
+  await page.getByRole('tab', { name: /Shop mock/ }).click()
+  await expect(page.getByTestId('mock-log')).toContainText('/products/7')
+  await expect(page.getByTestId('mock-log')).toContainText('Matched')
+  await app.close()
+})

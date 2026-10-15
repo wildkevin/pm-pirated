@@ -93,19 +93,21 @@ describe('redaction', () => {
             requestId: 'x',
             name: 'x',
             method: 'GET',
-            url: 'https://a/?key=S3CRET-KEY',
-            tests: [],
-            scriptErrors: [],
+            url: 'https://a/?key=S3CRET-KEY&enc=S3CRET%20KEY',
+            error: 'failed for S3CRET-KEY',
+            tests: [{ name: 'uses S3CRET-KEY', passed: false, skipped: false, error: 'expected S3CRET-KEY' }],
+            scriptErrors: ['boom S3CRET-KEY'],
             logs: [{ level: 'log', args: ['token is S3CRET-KEY'] }],
             sent: { method: 'GET', url: 'https://a/?key=S3CRET-KEY', headers: [{ key: 'Authorization', value: 'Bearer abc' }, { key: 'X-Other', value: 'v S3CRET-KEY' }], body: 'pw=S3CRET-KEY' },
             response: { headers: [{ key: 'Set-Cookie', value: 'sid=1' }], body: 'echo S3CRET-KEY' },
           },
         ],
       },
-      ['S3CRET-KEY', 'abc'],
+      ['S3CRET-KEY', 'abc', 'S3CRET KEY'],
     )
     const text = JSON.stringify(out)
     expect(text).not.toContain('S3CRET-KEY')
+    expect(text).not.toContain('S3CRET%20KEY')
     expect(text).not.toContain('Bearer abc')
     expect(text).not.toContain('sid=1')
     expect(out.results[0].sent!.headers[1].value).toBe('v ••••••')

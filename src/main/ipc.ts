@@ -10,6 +10,7 @@ import { rawUrl } from '../shared/format/url'
 import { CHANNELS, RUNNER_EVENT, type Api, type ImportResult, type ResolvedVariable, type RunnerEvent, type RunRecord } from '../shared/ipc'
 import type { EngineClient } from './engineClient'
 import { codeLanguages, generateCode } from './codegen'
+import { buildRoutes, createDefinition, deleteDefinition, readDefinitions, saveDefinition, type MockManager } from './mocks'
 import { ARGS } from './ipcSchemas'
 import { buildRunCollection, deleteRun, listRuns, previewData, readDataFile, readRun, redactRecord, saveRun } from './runner'
 import { getToken, parseCallback } from './oauth2'
@@ -28,6 +29,7 @@ export interface IpcDeps {
   settings: AppSettings
   secrets: SecretStore
   engine: EngineClient
+  mocks: MockManager
   /** Rebuilds the extra-CA bundle from settings; returns its path (or undefined). */
   caBundle(): Promise<string | undefined>
 }
@@ -47,9 +49,14 @@ export function registerIpc(deps: IpcDeps): void {
   const variables = () => (vars ??= new Variables(ws(), deps.secrets))
   const reopen = () => store.openWorkspace(ws())
   const use = (dir: string) => {
+    const switched = root !== dir
     root = dir
     vars = new Variables(dir, deps.secrets)
+    // Mocks belong to a workspace: stop the old ones, start this one's auto-start mocks.
+    if (switched) void deps.mocks.stopAll().then(() => deps.mocks.autoStart(dir)).catch(() => undefined)
   }
+  /** Saved examples may have changed: running mocks serving that collection reload their routes. */
+  const examplesChanged = (id: string) => void deps.mocks.refresh(ws(), store.collectionOf(id)).catch(() => undefined)
   const cookieFile = () => join(ws(), '.pmlocal', 'cookies.json')
 
   // Files the user picked in a dialog this session; other paths from the window must be in the workspace.
@@ -99,21 +106,27 @@ export function registerIpc(deps: IpcDeps): void {
     },
     async createRequest(parentId, name, item) {
       const id = await store.createRequest(ws(), parentId, name, item)
+      examplesChanged(id)
       return { workspace: await reopen(), id }
     },
     async renameNode(id, name) {
       const newId = await store.renameNode(ws(), id, name)
       if (isCollectionId(id)) await variables().move(`col:${id}`, `col:${newId}`)
+      // Mocks serving the renamed collection/folder follow it.
+      for (const m of await readDefinitions(ws()))
+        if (m.def.target === id || m.def.target.startsWith(`${id}/`)) await saveDefinition(ws(), m.id, { ...m.def, target: newId + m.def.target.slice(id.length) })
       return { workspace: await reopen(), id: newId }
     },
     async deleteNode(id) {
       await store.deleteNode(ws(), id)
+      examplesChanged(id)
       if (isCollectionId(id)) await variables().forget(`col:${id}`)
       return reopen()
     },
     readRequest: (id) => store.readRequest(ws(), id),
     async saveRequest(id, item) {
       await store.saveRequest(ws(), id, item)
+      examplesChanged(id)
       return reopen()
     },
     readContainer: (id) => store.readContainer(ws(), id),
@@ -311,6 +324,31 @@ export function registerIpc(deps: IpcDeps): void {
       return saveJson(deps.win, `${sanitizeName(record.name)}.postman_test_run.json`, record)
     },
     codeLanguages: async () => codeLanguages(),
+    listMocks: () => deps.mocks.list(ws()),
+    async createMock(def) {
+      const id = await createDefinition(ws(), def)
+      return { mocks: await deps.mocks.list(ws()), id }
+    },
+    async saveMock(id, def) {
+      await saveDefinition(ws(), id, def)
+      if (deps.mocks.isRunning(id)) {
+        await deps.mocks.stop(id)
+        await deps.mocks.start(ws(), id)
+      }
+      return deps.mocks.list(ws())
+    },
+    async deleteMock(id) {
+      await deps.mocks.stop(id)
+      await deleteDefinition(ws(), id)
+      return deps.mocks.list(ws())
+    },
+    startMock: (id) => deps.mocks.start(ws(), id),
+    stopMock: (id) => deps.mocks.stop(id),
+    async mockRoutes(id) {
+      const def = (await readDefinitions(ws())).find((d) => d.id === id)
+      if (!def) throw new Error('Mock server not found')
+      return buildRoutes(ws(), def.def.target)
+    },
     async generateCode(requestId, item, environmentId, language, variant) {
       const dir = ws()
       const v = variables()

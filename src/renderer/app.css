@@ -1847,3 +1847,81 @@ kbd {
 .run-stats > span {
   white-space: nowrap;
 }
+
+/* ---------- Mock servers ---------- */
+.status-dot {
+  width: 8px;
+  height: 8px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--grey-40);
+}
+.status-dot.on {
+  background: var(--success);
+}
+.status-dot.error {
+  background: var(--error);
+}
+.mock-url {
+  font-family: var(--font-code);
+  background: var(--bg-hover);
+  padding: 2px 6px;
+  border-radius: var(--radius);
+  user-select: text;
+}
+.mock-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  gap: 16px;
+  padding-bottom: 12px;
+}
+.mock-left {
+  width: 46%;
+  min-width: 340px;
+  overflow: auto;
+}
+.mock-form .form-row > .field-label {
+  width: 150px;
+}
+.mock-right {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.mock-log-head {
+  display: flex;
+  align-items: center;
+}
+.mock-log {
+  flex: 1;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 4px 0;
+  font-family: var(--font-code);
+  font-size: var(--text-s);
+}
+.mock-log > .muted {
+  padding: 8px;
+}
+.mock-log-row {
+  display: flex;
+  gap: 8px;
+  padding: 3px 8px;
+  white-space: nowrap;
+  user-select: text;
+}
+.mock-log-row .method {
+  min-width: 40px;
+  text-align: left;
+}
+.mock-log-path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mock-log-reason {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

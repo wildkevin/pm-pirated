@@ -1,14 +1,19 @@
+import type { MockEvent } from '../../shared/mock'
 import type { RunnerEvent } from '../../shared/ipc'
 
-// One IPC listener for the whole app; views subscribe/unsubscribe here.
-const listeners = new Set<(e: RunnerEvent) => void>()
-let attached = false
-
-export function onRunnerEvent(fn: (e: RunnerEvent) => void): () => void {
-  if (!attached) {
-    attached = true
-    window.api.onRunnerEvent((e) => listeners.forEach((l) => l(e)))
+// One IPC listener per event type for the whole app; views subscribe/unsubscribe here.
+function bus<E>(attach: (cb: (e: E) => void) => void) {
+  const listeners = new Set<(e: E) => void>()
+  let attached = false
+  return (fn: (e: E) => void): (() => void) => {
+    if (!attached) {
+      attached = true
+      attach((e) => listeners.forEach((l) => l(e)))
+    }
+    listeners.add(fn)
+    return () => listeners.delete(fn)
   }
-  listeners.add(fn)
-  return () => listeners.delete(fn)
 }
+
+export const onRunnerEvent = bus<RunnerEvent>((cb) => window.api.onRunnerEvent(cb))
+export const onMockEvent = bus<MockEvent>((cb) => window.api.onMockEvent(cb))

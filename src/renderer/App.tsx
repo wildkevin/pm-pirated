@@ -5,6 +5,7 @@ import type { RunReport } from '../shared/engine'
 import type { PmAuth, PmItem, TreeNode } from '../shared/format/types'
 import { rawUrl } from '../shared/format/url'
 import type { HistoryEntry, ImportResult, OAuth2Config, ResolvedVariable } from '../shared/ipc'
+import type { MockInfo, MockLogEntry } from '../shared/mock'
 import type { AppSettingsData } from '../shared/settings'
 import { getAttr, setAttr } from './lib/auth'
 import { cleanError, viewBody } from './lib/body'
@@ -15,7 +16,9 @@ import { Console, type ConsoleEntry } from './components/Console'
 import { CookiesModal, ImportModal, SaveRequestModal, SettingsModal } from './components/modals'
 import { RequestEditor } from './components/request/RequestEditor'
 import { ResponseViewer } from './components/response/ResponseViewer'
+import { CreateMockModal, MockView } from './components/MockView'
 import { RunnerView } from './components/RunnerView'
+import { onMockEvent } from './lib/runnerBus'
 import { Sidebar, type Panel, type SidebarActions } from './components/Sidebar'
 import { TabsBar } from './components/TabsBar'
 import { VariablesEditor } from './components/VariablesEditor'
@@ -25,7 +28,7 @@ let seq = 0
 const nextId = () => `${Date.now()}-${++seq}`
 const MAX_CONSOLE = 300
 
-type ModalState = { kind: 'import' } | { kind: 'settings' } | { kind: 'cookies' } | { kind: 'save'; key: string } | null
+type ModalState = { kind: 'import' } | { kind: 'settings' } | { kind: 'cookies' } | { kind: 'save'; key: string } | { kind: 'mock'; target?: string } | null
 
 function findPath(nodes: TreeNode[], id: string): TreeNode[] {
   for (const n of nodes) {
@@ -53,6 +56,8 @@ export function App() {
   const [consoleEntries, setConsoleEntries] = useState<ConsoleEntry[]>([])
   const [modal, setModal] = useState<ModalState>(null)
   const [codeOpen, setCodeOpen] = useState(false)
+  const [mocks, setMocks] = useState<MockInfo[]>([])
+  const [mockLogs, setMockLogs] = useState<Record<string, MockLogEntry[]>>({})
   const restoredRoot = useRef<string | null>(null)
 
   const fail = useCallback((e: unknown) => dispatch({ type: 'error', error: cleanError(e) }), [])
@@ -82,6 +87,8 @@ export function App() {
     void run(async () => {
       dispatch({ type: 'restore', ui: await window.api.readUiState() })
       setHistory(await window.api.listHistory())
+      setMocks(await window.api.listMocks())
+      setMockLogs({})
       setConsoleEntries([])
       restoredRoot.current = root
     })
@@ -92,6 +99,15 @@ export function App() {
     const t = setTimeout(() => void window.api.saveUiState(toUiState(stateRef.current)).catch(() => undefined), 400)
     return () => clearTimeout(t)
   }, [root, state.tabs, state.activeKey, state.activeEnvironment])
+
+  useEffect(
+    () =>
+      onMockEvent((e) => {
+        if ('log' in e) setMockLogs((prev) => ({ ...prev, [e.id]: [...(prev[e.id] ?? []), e.log].slice(-200) }))
+        else setMocks((prev) => prev.map((m) => (m.id === e.id ? { ...m, status: e.status } : m)))
+      }),
+    [],
+  )
 
   useEffect(() => {
     window.api.onBeforeClose(() => {
@@ -329,6 +345,20 @@ export function App() {
         await window.api.deleteHistory(id)
         setHistory(await window.api.listHistory())
       }),
+    openMock: (id, name) => {
+      const open = stateRef.current.tabs.find((t) => t.id === id)
+      if (open) dispatch({ type: 'activate', key: open.key })
+      else dispatch({ type: 'open', id, doc: { kind: 'mock', title: name } })
+    },
+    createMock: (target) => setModal({ kind: 'mock', target }),
+    startMock: (id) => void run(() => window.api.startMock(id)),
+    stopMock: (id) => void run(() => window.api.stopMock(id)),
+    deleteMock: (id, name) =>
+      void run(async () => {
+        if (!window.confirm(`Delete mock server "${name}"?`)) return
+        setMocks(await window.api.deleteMock(id))
+        dispatch({ type: 'removed', id })
+      }),
     newRequest: newRequestTab,
     openImport: () => setModal({ kind: 'import' }),
   }
@@ -382,6 +412,24 @@ export function App() {
       )
     }
     const doc = active.doc
+    if (doc.kind === 'mock') {
+      return (
+        <MockView
+          key={active.key}
+          info={mocks.find((m) => m.id === active.id)}
+          workspace={state.workspace!}
+          logs={mockLogs[active.id!] ?? []}
+          onSave={async (def) => {
+            setMocks(await window.api.saveMock(active.id!, def))
+            dispatch({ type: 'setDoc', key: active.key, doc: { kind: 'mock', title: def.name } })
+          }}
+          onStart={() => void run(() => window.api.startMock(active.id!))}
+          onStop={() => void run(() => window.api.stopMock(active.id!))}
+          onClearLog={() => setMockLogs((prev) => ({ ...prev, [active.id!]: [] }))}
+          onError={fail}
+        />
+      )
+    }
     if (doc.kind === 'runner') {
       return (
         <RunnerView
@@ -503,6 +551,7 @@ export function App() {
                     renamingId={renamingId}
                     activeEnvironment={state.activeEnvironment}
                     history={history}
+                    mocks={mocks}
                     actions={actions}
                   />
                 </Allotment.Pane>
@@ -561,6 +610,22 @@ export function App() {
       {modal?.kind === 'import' && <ImportModal onClose={() => setModal(null)} onImported={(r) => void onImported(r)} />}
       {modal?.kind === 'settings' && <SettingsModal onClose={() => setModal(null)} onSaved={setSettings} />}
       {modal?.kind === 'cookies' && <CookiesModal onClose={() => setModal(null)} />}
+      {modal?.kind === 'mock' && state.workspace && (
+        <CreateMockModal
+          workspace={state.workspace}
+          existingPorts={mocks.map((m) => m.def.port)}
+          defaultTarget={modal.target}
+          onClose={() => setModal(null)}
+          onCreate={async (def) => {
+            const created = await run(() => window.api.createMock(def))
+            if (!created) return
+            setMocks(created.mocks)
+            setModal(null)
+            setPanel('mocks')
+            dispatch({ type: 'open', id: created.id, doc: { kind: 'mock', title: def.name } })
+          }}
+        />
+      )}
       {modalTab && modalTab.doc.kind === 'request' && state.workspace && (
         <SaveRequestModal
           workspace={state.workspace}

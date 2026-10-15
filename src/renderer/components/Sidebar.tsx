@@ -1,13 +1,14 @@
-import { Check, ChevronDown, ChevronRight, Clock, Folder, Globe, Layers, MoreHorizontal, Plus, Trash2 } from 'lucide-react'
+import { Check, ChevronDown, ChevronRight, Clock, Folder, Globe, Layers, MoreHorizontal, Plus, Server, Trash2 } from 'lucide-react'
 import { useEffect, useRef, useState, type ReactElement } from 'react'
 import type { EnvironmentInfo, TreeNode, WorkspaceInfo } from '../../shared/format/types'
 import type { HistoryEntry } from '../../shared/ipc'
+import type { MockInfo } from '../../shared/mock'
 import { rawUrl } from '../../shared/format/url'
 import { methodClass, methodLabel } from '../lib/methods'
 import { dayLabel, groupBy } from '../lib/misc'
 import { Menu } from './common/ui'
 
-export type Panel = 'collections' | 'environments' | 'history'
+export type Panel = 'collections' | 'environments' | 'history' | 'mocks'
 
 export interface SidebarActions {
   openRequest(id: string): void
@@ -30,6 +31,12 @@ export interface SidebarActions {
   // history
   openHistory(entry: HistoryEntry): void
   deleteHistory(id?: string): void
+  // mock servers
+  openMock(id: string, name: string): void
+  createMock(target?: string): void
+  startMock(id: string): void
+  stopMock(id: string): void
+  deleteMock(id: string, name: string): void
   // header
   newRequest(): void
   openImport(): void
@@ -43,6 +50,7 @@ interface Props {
   renamingId: string | null
   activeEnvironment: string | null
   history: HistoryEntry[]
+  mocks: MockInfo[]
   actions: SidebarActions
 }
 
@@ -52,6 +60,7 @@ export function Sidebar(p: Props) {
     { id: 'collections', label: 'Collections', icon: <Layers size={18} /> },
     { id: 'environments', label: 'Environments', icon: <Globe size={18} /> },
     { id: 'history', label: 'History', icon: <Clock size={18} /> },
+    { id: 'mocks', label: 'Mock Servers', icon: <Server size={18} /> },
   ]
   return (
     <aside className="sidebar">
@@ -75,6 +84,7 @@ export function Sidebar(p: Props) {
               { label: 'HTTP Request', onClick: p.actions.newRequest },
               { label: 'Collection', onClick: p.actions.createCollection },
               { label: 'Environment', onClick: p.actions.createEnvironment },
+              { label: 'Mock Server', onClick: () => p.actions.createMock() },
             ]}
           />
         )}
@@ -92,6 +102,7 @@ export function Sidebar(p: Props) {
           {p.panel === 'collections' && <CollectionsPanel {...p} />}
           {p.panel === 'environments' && <EnvironmentsPanel {...p} />}
           {p.panel === 'history' && <HistoryPanel {...p} />}
+          {p.panel === 'mocks' && <MocksPanel {...p} />}
         </div>
       </div>
     </aside>
@@ -182,6 +193,7 @@ function CollectionsPanel({ workspace, activeId, renamingId, actions }: Props) {
                   { label: 'Add folder', onClick: () => actions.createFolder(n.id) },
                   { label: 'Edit', onClick: () => actions.openContainer(n.id) },
                   { label: 'Run', onClick: () => actions.runCollection(n.id) },
+                  { label: 'Mock', onClick: () => actions.createMock(n.id) },
                 ]
               : []),
             ...(n.kind === 'collection' ? [{ label: 'Export', onClick: () => actions.exportCollection(n.id) }] : []),
@@ -410,6 +422,48 @@ function HistoryPanel({ history, actions }: Props) {
           </div>
         ))}
       </div>
+    </>
+  )
+}
+
+// ---------------- Mock servers ----------------
+
+function MocksPanel({ mocks, actions }: Props) {
+  const [menu, setMenu] = useState<{ m: MockInfo; x: number; y: number } | null>(null)
+  return (
+    <>
+      <PanelHead title="Mock Servers" onAdd={() => actions.createMock()} addLabel="New mock server" />
+      <div className="tree">
+        {mocks.length === 0 && <div className="tree-empty">A mock server answers with the examples saved in a collection. Click + to create one.</div>}
+        {mocks.map((m) => (
+          <div key={m.id} className="tree-row" data-testid="mock-row" onClick={() => actions.openMock(m.id, m.def.name)} title={m.status.url ?? m.status.error ?? ''}>
+            <span className={`status-dot${m.status.running ? ' on' : m.status.error ? ' error' : ''}`} />
+            <span className="tree-name">{m.def.name}</span>
+            <span className="muted">:{m.def.port}</span>
+            <button
+              className="btn-icon tree-more"
+              aria-label={`Actions for ${m.def.name}`}
+              onClick={(e) => {
+                e.stopPropagation()
+                const r = e.currentTarget.getBoundingClientRect()
+                setMenu({ m, x: r.left, y: r.bottom })
+              }}
+            >
+              <MoreHorizontal size={14} />
+            </button>
+          </div>
+        ))}
+      </div>
+      {menu && (
+        <Menu
+          style={{ left: menu.x, top: menu.y }}
+          onClose={() => setMenu(null)}
+          items={[
+            menu.m.status.running ? { label: 'Stop', onClick: () => actions.stopMock(menu.m.id) } : { label: 'Start', onClick: () => actions.startMock(menu.m.id) },
+            { label: 'Delete', danger: true, onClick: () => actions.deleteMock(menu.m.id, menu.m.def.name) },
+          ]}
+        />
+      )}
     </>
   )
 }

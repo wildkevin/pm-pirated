@@ -61,6 +61,16 @@ const settings = z.object({
   }),
 })
 
+const mockDef = z.object({
+  name: name,
+  target: id,
+  port: z.number().int().min(1).max(65535),
+  allowLan: z.boolean(),
+  delayMs: z.number().int().min(0).max(600_000),
+  autoStart: z.boolean(),
+  cors: z.boolean().optional(),
+})
+
 /** Argument schemas per API method; every IPC call is parsed against these in main. */
 export const ARGS = {
   openWorkspaceDialog: z.tuple([]),
@@ -119,5 +129,12 @@ export const ARGS = {
   deleteRun: z.tuple([id]),
   exportRun: z.tuple([id]),
   codeLanguages: z.tuple([]),
+  listMocks: z.tuple([]),
+  createMock: z.tuple([mockDef]),
+  saveMock: z.tuple([id, mockDef]),
+  deleteMock: z.tuple([id]),
+  startMock: z.tuple([id]),
+  stopMock: z.tuple([id]),
+  mockRoutes: z.tuple([id]),
   generateCode: z.tuple([id.nullable(), pmItem, id.nullable(), z.string().max(40), z.string().max(40)]),
 } satisfies Record<keyof Api, z.ZodType>

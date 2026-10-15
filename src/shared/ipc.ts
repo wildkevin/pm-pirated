@@ -1,5 +1,6 @@
 // The only surface the renderer can reach (exposed as window.api by the preload).
 import type { CookieInfo, RunReport, RunnerItemResult, RunnerSummary } from './engine'
+import type { MockDefinition, MockEvent, MockInfo, MockRoute, MockStatus } from './mock'
 import type { PmContainer, PmItem, WorkspaceInfo } from './format/types'
 import type { AppSettingsData } from './settings'
 
@@ -155,6 +156,16 @@ export interface Api {
   deleteRun(id: string): Promise<void>
   exportRun(id: string): Promise<boolean>
 
+  // mock servers
+  listMocks(): Promise<MockInfo[]>
+  createMock(def: MockDefinition): Promise<{ mocks: MockInfo[]; id: string }>
+  /** Saves the definition; a running mock restarts with it. */
+  saveMock(id: string, def: MockDefinition): Promise<MockInfo[]>
+  deleteMock(id: string): Promise<MockInfo[]>
+  startMock(id: string): Promise<MockStatus>
+  stopMock(id: string): Promise<MockStatus>
+  mockRoutes(id: string): Promise<MockRoute[]>
+
   // code snippets
   codeLanguages(): Promise<CodeLanguage[]>
   generateCode(requestId: string | null, item: PmItem, environmentId: string | null, language: string, variant: string): Promise<string>
@@ -170,9 +181,11 @@ export interface AppEvents {
   onBeforeClose(cb: () => void): void
   closeReady(): void
   onRunnerEvent(cb: (e: RunnerEvent) => void): void
+  onMockEvent(cb: (e: MockEvent) => void): void
 }
 export const BEFORE_CLOSE = 'app:before-close'
 export const RUNNER_EVENT = 'runner:event'
+export const MOCK_EVENT = 'mocks:event'
 export const CLOSE_READY = 'app:close-ready'
 
 export const CHANNELS = {
@@ -220,6 +233,13 @@ export const CHANNELS = {
   deleteRun: 'runner:delete',
   exportRun: 'runner:export',
   codeLanguages: 'code:languages',
+  listMocks: 'mocks:list',
+  createMock: 'mocks:create',
+  saveMock: 'mocks:save',
+  deleteMock: 'mocks:delete',
+  startMock: 'mocks:start',
+  stopMock: 'mocks:stop',
+  mockRoutes: 'mocks:routes',
   generateCode: 'code:generate',
 } as const satisfies Record<keyof Api, string>
 

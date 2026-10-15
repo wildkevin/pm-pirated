@@ -38,7 +38,7 @@ describe('mock server', () => {
     const body = await res.json()
     expect(body.name).toBe('Ada')
     expect(body.id).toMatch(/^[0-9a-f-]{36}$/)
-    expect(res.headers.get('access-control-allow-origin')).toBe('*')
+    expect(res.headers.get('access-control-allow-origin')).toBeNull()
 
     const created = await fetch(`${mock.url}/users`, { method: 'POST', body: '{}' })
     expect([created.status, await created.text()]).toEqual([201, 'made'])
@@ -52,6 +52,18 @@ describe('mock server', () => {
       ['POST', '/users', 201, 'Created'],
       ['GET', '/nope', 404, undefined],
     ])
+  })
+
+  it('CORS is opt-in, and localhost-only mocks refuse foreign Host headers', async () => {
+    const http = await import('node:http')
+    mock = await startMockServer({ host: '127.0.0.1', port: 0, delayMs: 0, cors: true }, routes, () => undefined)
+    expect((await fetch(`${mock.url}/users/1`)).headers.get('access-control-allow-origin')).toBe('*')
+    const pre = await fetch(`${mock.url}/users/1`, { method: 'OPTIONS', headers: { 'Access-Control-Request-Method': 'GET', Origin: 'http://localhost:5173' } })
+    expect(pre.status).toBe(204)
+    const status = await new Promise<number>((resolve) =>
+      http.get(`${mock!.url}/users/1`, { headers: { Host: 'evil.example:80' } }, (r) => resolve(r.statusCode!)),
+    )
+    expect(status).toBe(403)
   })
 
   it('hot-swaps routes, applies the delay, and reports a busy port', async () => {
