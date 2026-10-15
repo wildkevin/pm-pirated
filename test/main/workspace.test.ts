@@ -9,6 +9,8 @@ import {
   createRequest,
   deleteNode,
   duplicateNode,
+  createWorkspaceIn,
+  workspaceName,
   initWorkspace,
   isWorkspace,
   loadChain,
@@ -259,5 +261,17 @@ describe('duplicate', () => {
     expect(names(info.collections)).toEqual(['Shop', 'Shop Copy'])
     const ids = await Promise.all([col, colCopy].map(async (c) => JSON.parse(await readFile(join(root, c, 'collection.json'), 'utf8')).info._postman_id))
     expect(ids[0]).not.toBe(ids[1])
+  })
+})
+
+describe('create workspace', () => {
+  it('creates "<location>/<name>" (unique), named as typed, and reads the name back', async () => {
+    const a = await createWorkspaceIn(join(root, 'PM Local'), 'Payments: v2')
+    expect(a).toBe(join(root, 'PM Local', 'Payments_ v2'))
+    expect(await isWorkspace(a)).toBe(true)
+    expect(await workspaceName(a)).toBe('Payments: v2')
+    const b = await createWorkspaceIn(join(root, 'PM Local'), 'Payments: v2')
+    expect(b).not.toBe(a)
+    expect(await workspaceName(join(root, 'missing'))).toBeNull()
   })
 })

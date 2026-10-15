@@ -42,7 +42,7 @@ test('gallery', async () => {
   const url = (p: Page) => p.getByLabel('Request URL')
 
   await shot('01-welcome')
-  await page.getByRole('button', { name: 'Open workspace' }).first().click()
+  await page.getByRole('button', { name: 'Open an existing workspace folder…' }).click()
 
   // Environment
   await page.getByRole('button', { name: 'Create new' }).click()

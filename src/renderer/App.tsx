@@ -1,10 +1,10 @@
 import { Allotment } from 'allotment'
-import { Cookie, FolderOpen, Globe, PanelLeft, PanelRight, PlayCircle, Radio, Terminal } from 'lucide-react'
+import { Cookie, Globe, PanelLeft, PanelRight, PlayCircle, Radio, Terminal } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import type { RunReport } from '../shared/engine'
 import type { PmAuth, PmItem, TreeNode } from '../shared/format/types'
 import { rawUrl } from '../shared/format/url'
-import type { CaptureState, HistoryEntry, ImportResult, OAuth2Config, ResolvedVariable } from '../shared/ipc'
+import type { CaptureState, HistoryEntry, ImportResult, OAuth2Config, ResolvedVariable, WorkspaceListItem } from '../shared/ipc'
 import type { CapturedExchange } from '../shared/engine'
 import type { MockInfo, MockLogEntry } from '../shared/mock'
 import type { AppSettingsData } from '../shared/settings'
@@ -27,6 +27,7 @@ import { TabsBar } from './components/TabsBar'
 import { VariablesEditor } from './components/VariablesEditor'
 import { activeTab, initialState, isDirty, newDraft, reducer, tabTitle, toUiState, type Action, type Tab, type TabDoc } from './state'
 import { AppHeader, type SearchHit } from './components/AppHeader'
+import { CreateWorkspacePage, WorkspacesPage } from './components/WorkspacePages'
 
 let seq = 0
 const nextId = () => `${Date.now()}-${++seq}`
@@ -81,6 +82,10 @@ export function App() {
     if (view) setRightView(view)
   }
   const [searchOpen, setSearchOpen] = useState(false)
+  // Postman's workspace pages: "Create your workspace" and "View all workspaces".
+  const [page, setPage] = useState<'create' | 'workspaces' | null>(null)
+  const [workspaces, setWorkspaces] = useState<WorkspaceListItem[]>([])
+  const refreshWorkspaces = () => window.api.listWorkspaces().then(setWorkspaces, () => undefined)
   // Back/forward through previously active tabs (Postman's ⌘[ / ⌘]).
   const [nav, setNav] = useState<{ back: string[]; forward: string[] }>({ back: [], forward: [] })
   const navLast = useRef<string | null>(null)
@@ -204,8 +209,12 @@ export function App() {
   const switchWorkspace = (open: () => Promise<import('../shared/format/types').WorkspaceInfo | null>) =>
     run(async () => {
       const workspace = await open()
-      if (workspace) dispatch({ type: 'workspace', workspace })
+      if (workspace) {
+        dispatch({ type: 'workspace', workspace })
+        setPage(null)
+      }
       setSettings(await window.api.getSettings()) // recent workspaces changed
+      void refreshWorkspaces()
     })
   const openWorkspace = () => switchWorkspace(() => window.api.openWorkspaceDialog())
   /** `preview`: single click in the sidebar — reuse the preview tab (Postman). */
@@ -668,12 +677,18 @@ export function App() {
     <div className="app">
       <AppHeader
         workspace={state.workspace}
-        recent={settings?.recentWorkspaces ?? []}
+        title={page === 'workspaces' || (page === 'create' && state.workspace) ? 'Workspaces' : undefined}
+        workspaces={workspaces}
+        onSwitcherOpen={() => void refreshWorkspaces()}
+        onCreateWorkspace={() => setPage('create')}
+        onViewAllWorkspaces={() => {
+          void refreshWorkspaces()
+          setPage('workspaces')
+        }}
         canBack={live(nav.back).length > 0}
         canForward={live(nav.forward).length > 0}
         onBack={() => navigate('back')}
         onForward={() => navigate('forward')}
-        onOpenWorkspace={() => void openWorkspace()}
         onOpenRecent={(dir) => void switchWorkspace(() => window.api.openRecentWorkspace(dir))}
         onSettings={() => setModal({ kind: 'settings' })}
         searchOpen={searchOpen}
@@ -685,7 +700,26 @@ export function App() {
         }}
       />
 
-      {state.workspace ? (
+      {page === 'workspaces' ? (
+        <WorkspacesPage
+          current={state.workspace?.root ?? null}
+          workspaces={workspaces}
+          onOpen={(dir) => void (dir === state.workspace?.root ? setPage(null) : switchWorkspace(() => window.api.openRecentWorkspace(dir)))}
+          onForget={(dir) => void run(async () => (await window.api.forgetWorkspace(dir), await refreshWorkspaces()))}
+          onCreate={() => setPage('create')}
+        />
+      ) : page === 'create' || !state.workspace ? (
+        <CreateWorkspacePage
+          onCancel={state.workspace ? () => setPage(null) : undefined}
+          onOpenExisting={() => void openWorkspace()}
+          onCreated={(workspace) => {
+            dispatch({ type: 'workspace', workspace })
+            setPage(null)
+            void refreshWorkspaces()
+            void window.api.getSettings().then(setSettings)
+          }}
+        />
+      ) : state.workspace ? (
         <div className="main">
           <Allotment vertical proportionalLayout={false}>
             <Allotment.Pane>
@@ -750,15 +784,7 @@ export function App() {
             </Allotment.Pane>
           </Allotment>
         </div>
-      ) : (
-        <div className="welcome">
-          <h1>Welcome to PM Local</h1>
-          <p>A workspace is a folder on your computer. Collections and requests are stored in it as plain JSON files you can version with git.</p>
-          <button className="btn btn-primary" onClick={() => void openWorkspace()}>
-            <FolderOpen size={14} /> Open workspace
-          </button>
-        </div>
-      )}
+      ) : null}
 
       <footer className="status-bar">
         <button className={`status-btn${sidebarOpen ? '' : ' active'}`} aria-label={sidebarOpen ? 'Hide sidebar' : 'Show sidebar'} title="Toggle sidebar (Ctrl+\\)" disabled={!state.workspace} onClick={toggleSidebar}>

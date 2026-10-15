@@ -37,7 +37,7 @@ async function stubDialogs(app: ElectronApplication, dir: string) {
 }
 
 async function openWorkspace(page: Page) {
-  await page.getByRole('button', { name: 'Open workspace' }).first().click()
+  await page.getByRole('button', { name: 'Open an existing workspace folder…' }).click()
   await expect(page.getByRole('button', { name: 'Create new' })).toBeVisible()
 }
 
@@ -442,9 +442,8 @@ test('tab context menu closes others / left / right; URL text sits in the middle
   expect(Math.abs(line.y + line.height / 2 - (box.y + box.height / 2))).toBeLessThan(2)
   // Clicking the empty space below the text still focuses the input.
   await page.mouse.click(box.x + box.width - 20, box.y + box.height - 3)
-  await expect(urlBar(page)).toBeFocused()
-  await page.keyboard.type('x')
-  await expect(urlBar(page)).toHaveText('x')
+  // The page's focused element (CI's background windows never match :focus, so no toBeFocused).
+  await expect.poll(() => page.evaluate(() => document.activeElement?.getAttribute('aria-label'))).toBe('Request URL')
 
   await tabs.nth(0).click({ button: 'right' })
   await page.getByRole('menuitem', { name: 'Close all tabs' }).click()
@@ -496,5 +495,51 @@ test('sidebar like Postman: preview tabs, double-click to keep, favorites, dupli
   await page.getByRole('dialog', { name: 'Search workspace' }).getByRole('textbox').fill('tig')
   await page.keyboard.press('Enter')
   await expect(page.locator('.tabs [role=tab].active')).toContainText('Tigers')
+  await app.close()
+})
+
+test('create workspace like Postman: blank in a chosen location, from a local folder, switcher and Workspaces page', async () => {
+  const app = await launch(await temp('pml-ud-'))
+  const page = await app.firstWindow()
+  // First run: Postman's "Create your workspace" page.
+  const form = page.getByRole('form', { name: 'Create your workspace' })
+  await expect(form).toBeVisible()
+  const create = form.getByRole('button', { name: 'Create Workspace' })
+  await expect(create).toBeDisabled()
+  await form.getByLabel('Workspace name').fill('Shop API')
+  const parent = await temp('pml-loc-')
+  await stubDialogs(app, parent) // the folder picker answers with `parent`
+  await form.getByRole('button', { name: 'Change…' }).click()
+  await expect(form.locator('.ws-location-path')).toContainText(join(parent, 'Shop API'))
+  await create.click()
+  await expect(page.getByRole('button', { name: 'Workspaces', exact: true })).toContainText('Shop API')
+  expect(JSON.parse(await readFile(join(parent, 'Shop API', 'workspace.json'), 'utf8')).name).toBe('Shop API')
+
+  // From a local folder: switcher → Create → choose an existing project folder (name defaults to it).
+  const project = await temp('pml-proj-')
+  await stubDialogs(app, project)
+  await page.getByRole('button', { name: 'Workspaces', exact: true }).click()
+  await page.getByRole('dialog', { name: 'Switch workspace' }).getByRole('button', { name: 'Create' }).click()
+  await form.getByRole('button', { name: 'Choose a folder' }).click()
+  await expect(form.getByRole('radio', { name: /From a local folder/ })).toHaveAttribute('aria-checked', 'true')
+  await expect(form.getByLabel('Workspace name')).toHaveValue(project.split(/[\\/]/).pop()!)
+  await create.click()
+  await expect(page.getByRole('button', { name: 'Create new' })).toBeVisible()
+  expect(await readdir(project)).toContain('workspace.json')
+
+  // Switcher lists both; switch back to Shop API.
+  await page.getByRole('button', { name: 'Workspaces', exact: true }).click()
+  const switcher = page.getByRole('dialog', { name: 'Switch workspace' })
+  await expect(switcher.getByRole('option')).toHaveCount(2)
+  await switcher.getByRole('option', { name: 'Shop API' }).click()
+  await expect(page.getByRole('button', { name: 'Workspaces', exact: true })).toContainText('Shop API')
+
+  // View all workspaces → remove the other one from the list.
+  await page.getByRole('button', { name: 'Workspaces', exact: true }).click()
+  await page.getByRole('button', { name: 'View all workspaces' }).click()
+  await expect(page.locator('.ws-table tbody tr')).toHaveCount(2)
+  await page.locator('.ws-table tbody tr', { hasText: project }).getByRole('button', { name: /^Actions for/ }).click()
+  await page.getByRole('menuitem', { name: 'Remove from list' }).click()
+  await expect(page.locator('.ws-table tbody tr')).toHaveCount(1)
   await app.close()
 })

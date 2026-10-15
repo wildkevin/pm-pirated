@@ -1,9 +1,9 @@
-import { ArrowLeft, ArrowRight, ChevronDown, FolderOpen, Search, Settings as SettingsIcon } from 'lucide-react'
+import { ArrowLeft, ArrowRight, ChevronDown, Folder, FolderOpen, LayoutGrid, Search, Settings as SettingsIcon } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { TreeNode, WorkspaceInfo } from '../../shared/format/types'
+import type { WorkspaceListItem } from '../../shared/ipc'
 import { methodClass, methodLabel } from '../lib/methods'
 import { mod } from '../lib/misc'
-import { Menu } from './common/ui'
 import logo from '../../../build/icon.png'
 
 export interface SearchHit {
@@ -17,12 +17,16 @@ export interface SearchHit {
 
 interface Props {
   workspace: WorkspaceInfo | null
-  recent: string[]
+  /** Shown instead of the workspace name on the Workspaces / Create pages. */
+  title?: string
+  workspaces: WorkspaceListItem[]
+  onSwitcherOpen(): void
+  onCreateWorkspace(): void
+  onViewAllWorkspaces(): void
   canBack: boolean
   canForward: boolean
   onBack(): void
   onForward(): void
-  onOpenWorkspace(): void
   onOpenRecent(dir: string): void
   onSettings(): void
   onPick(hit: SearchHit): void
@@ -30,7 +34,6 @@ interface Props {
   setSearchOpen(open: boolean): void
 }
 
-const baseName = (dir: string) => dir.split(/[\\/]/).filter(Boolean).pop() ?? dir
 
 /** Postman 12's top bar: navigation, workspace switcher, search (Ctrl+K), settings. */
 export function AppHeader(p: Props) {
@@ -44,21 +47,29 @@ export function AppHeader(p: Props) {
       <button className="btn-icon header-nav" aria-label="Go forward" title={`Go forward (${mod}])`} disabled={!p.canForward} onClick={p.onForward}>
         <ArrowRight size={14} />
       </button>
-      <button className="workspace-switcher" aria-label="Workspaces" title={p.workspace?.root} onClick={(e) => setMenu(e.currentTarget.getBoundingClientRect())}>
-        <FolderOpen size={13} />
-        <span className="workspace-name">{p.workspace?.name ?? 'No workspace'}</span>
+      <button
+        className="workspace-switcher"
+        aria-label="Workspaces"
+        aria-expanded={!!menu}
+        title={p.workspace?.root}
+        onClick={(e) => {
+          p.onSwitcherOpen()
+          setMenu(e.currentTarget.getBoundingClientRect())
+        }}
+      >
+        {p.title ? <LayoutGrid size={13} /> : <FolderOpen size={13} />}
+        <span className="workspace-name">{p.title ?? p.workspace?.name ?? 'Workspaces'}</span>
         <ChevronDown size={14} />
       </button>
       {menu && (
-        <Menu
-          label="Workspaces"
-          style={{ left: menu.left, top: menu.bottom + 4 }}
+        <WorkspaceSwitcher
+          at={menu}
+          current={p.workspace?.root ?? null}
+          workspaces={p.workspaces}
           onClose={() => setMenu(null)}
-          items={[
-            ...p.recent.map((dir) => ({ label: baseName(dir), shortcut: dir === p.workspace?.root ? '✓' : undefined, onClick: () => dir !== p.workspace?.root && p.onOpenRecent(dir) })),
-            ...(p.recent.length ? (['separator'] as const) : []),
-            { label: 'Open workspace…', onClick: p.onOpenWorkspace },
-          ]}
+          onOpen={(dir) => dir !== p.workspace?.root && p.onOpenRecent(dir)}
+          onCreate={p.onCreateWorkspace}
+          onViewAll={p.onViewAllWorkspaces}
         />
       )}
       <span className="header-spacer" />
@@ -157,6 +168,52 @@ function SearchPalette({ workspace, onPick, onClose }: { workspace: WorkspaceInf
           {hits.length === 0 && <div className="palette-empty">No results for "{query}"</div>}
         </div>
       </div>
+    </div>
+  )
+}
+
+/** Postman's workspace switcher: search, Create, the workspace list and "View all workspaces". */
+function WorkspaceSwitcher(p: { at: DOMRect; current: string | null; workspaces: WorkspaceListItem[]; onClose(): void; onOpen(dir: string): void; onCreate(): void; onViewAll(): void }) {
+  const [query, setQuery] = useState('')
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const down = (e: MouseEvent) => !ref.current?.contains(e.target as Node) && p.onClose()
+    const key = (e: KeyboardEvent) => e.key === 'Escape' && p.onClose()
+    document.addEventListener('mousedown', down)
+    document.addEventListener('keydown', key)
+    return () => {
+      document.removeEventListener('mousedown', down)
+      document.removeEventListener('keydown', key)
+    }
+  }, [p])
+  const q = query.trim().toLowerCase()
+  const shown = p.workspaces.filter((w) => w.name && (!q || w.name.toLowerCase().includes(q)))
+  const go = (fn: () => void) => () => {
+    p.onClose()
+    fn()
+  }
+  return (
+    <div ref={ref} className="ws-switcher" role="dialog" aria-label="Switch workspace" style={{ left: p.at.left, top: p.at.bottom + 4 }}>
+      <div className="ws-switcher-top">
+        <input className="input" autoFocus aria-label="Search workspaces" placeholder="Search workspaces..." value={query} onChange={(e) => setQuery(e.target.value)} />
+        <button className="btn btn-secondary btn-small" onClick={go(p.onCreate)}>
+          Create
+        </button>
+      </div>
+      <div className="ws-switcher-list" role="listbox" aria-label="Workspaces">
+        {shown.map((w) => (
+          <button key={w.root} role="option" aria-selected={w.root === p.current} className={`ws-switcher-item${w.root === p.current ? ' current' : ''}`} title={w.root} onClick={go(() => p.onOpen(w.root))}>
+            <span className="ws-icon">
+              <Folder size={13} />
+            </span>
+            {w.name}
+          </button>
+        ))}
+        {shown.length === 0 && <div className="ws-switcher-empty">{q ? 'No workspaces match.' : 'No workspaces yet.'}</div>}
+      </div>
+      <button className="ws-switcher-all" onClick={go(p.onViewAll)}>
+        <LayoutGrid size={14} /> View all workspaces
+      </button>
     </div>
   )
 }

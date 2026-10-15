@@ -88,6 +88,14 @@ export interface UiState {
   favorites?: string[]
 }
 
+export type CreateWorkspaceInput = { name: string; setup: 'blank'; location: string } | { name: string; setup: 'folder'; folder: string }
+
+export interface WorkspaceListItem {
+  root: string
+  /** Null when the folder no longer holds a workspace. */
+  name: string | null
+}
+
 export interface Api {
   // workspace
   /** Folder picker; opens the folder as a workspace, initialising it if needed. */
@@ -95,6 +103,16 @@ export interface Api {
   /** The most recently used workspace, reopened at startup. */
   currentWorkspace(): Promise<WorkspaceInfo | null>
   refreshWorkspace(): Promise<WorkspaceInfo>
+  /** Where "Create workspace" puts new workspace folders unless another location is chosen. */
+  defaultWorkspaceLocation(): Promise<string>
+  /** Folder picker for the create page ('location' = parent folder, 'existing' = a project folder). */
+  pickFolder(purpose: 'location' | 'existing'): Promise<string | null>
+  /** Postman's "Create your workspace": a blank workspace in `location`, or one in an existing folder. */
+  createWorkspace(input: CreateWorkspaceInput): Promise<WorkspaceInfo>
+  /** Recent workspaces for the switcher and the Workspaces page. */
+  listWorkspaces(): Promise<WorkspaceListItem[]>
+  /** Removes a workspace from the recent list (the folder is left alone). */
+  forgetWorkspace(dir: string): Promise<void>
   /** Switches to a folder from Settings' recent workspaces list. */
   openRecentWorkspace(dir: string): Promise<WorkspaceInfo>
 
@@ -221,6 +239,11 @@ export const CHANNELS = {
   currentWorkspace: 'workspace:current',
   refreshWorkspace: 'workspace:refresh',
   openRecentWorkspace: 'workspace:openRecent',
+  defaultWorkspaceLocation: 'workspace:defaultLocation',
+  pickFolder: 'workspace:pickFolder',
+  createWorkspace: 'workspace:create',
+  listWorkspaces: 'workspace:list',
+  forgetWorkspace: 'workspace:forget',
   createCollection: 'node:createCollection',
   createFolder: 'node:createFolder',
   createRequest: 'node:createRequest',

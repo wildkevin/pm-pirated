@@ -75,12 +75,31 @@ export async function isWorkspace(root: string): Promise<boolean> {
   }
 }
 
-export async function initWorkspace(root: string): Promise<WorkspaceInfo> {
+export async function initWorkspace(root: string, name = basename(root)): Promise<WorkspaceInfo> {
   await mkdir(join(root, 'collections'), { recursive: true })
   await mkdir(join(root, '.pmlocal'), { recursive: true })
   await writeFileAtomic(join(root, '.pmlocal', '.gitignore'), '*\n')
-  await writeFileAtomic(join(root, 'workspace.json'), stableStringify({ name: basename(root), formatVersion: 1 }))
+  await writeFileAtomic(join(root, 'workspace.json'), stableStringify({ name, formatVersion: 1 }))
   return openWorkspace(root)
+}
+
+/** Name from workspace.json, or null when the folder is not (or no longer) a workspace. */
+export async function workspaceName(root: string): Promise<string | null> {
+  try {
+    const meta = await readJson<{ name?: string }>(join(root, 'workspace.json'))
+    return meta.name ?? basename(root)
+  } catch {
+    return null
+  }
+}
+
+/** New workspace folder "<parent>/<name>" (made unique), initialised and named. */
+export async function createWorkspaceIn(parent: string, name: string): Promise<string> {
+  await mkdir(parent, { recursive: true })
+  const dir = join(parent, uniqueName(sanitizeName(name), await entryNames(parent)))
+  await mkdir(dir)
+  await initWorkspace(dir, name)
+  return dir
 }
 
 export async function openWorkspace(root: string): Promise<WorkspaceInfo> {

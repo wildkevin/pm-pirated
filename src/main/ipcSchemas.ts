@@ -81,6 +81,16 @@ export const ARGS = {
   currentWorkspace: z.tuple([]),
   refreshWorkspace: z.tuple([]),
   openRecentWorkspace: z.tuple([z.string().max(4096)]),
+  defaultWorkspaceLocation: z.tuple([]),
+  pickFolder: z.tuple([z.enum(['location', 'existing'])]),
+  createWorkspace: z.tuple([
+    z.discriminatedUnion('setup', [
+      z.object({ name: z.string().trim().min(1).max(200), setup: z.literal('blank'), location: z.string().max(4096) }),
+      z.object({ name: z.string().trim().min(1).max(200), setup: z.literal('folder'), folder: z.string().max(4096) }),
+    ]),
+  ]),
+  listWorkspaces: z.tuple([]),
+  forgetWorkspace: z.tuple([z.string().max(4096)]),
   createCollection: z.tuple([name]),
   createFolder: z.tuple([id, name]),
   createRequest: z.tuple([id, name, pmItem.optional()]),

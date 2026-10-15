@@ -1,4 +1,4 @@
-import { BrowserWindow, dialog, ipcMain, net } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, net } from 'electron'
 import { randomUUID } from 'node:crypto'
 import { readFile, writeFile } from 'node:fs/promises'
 import { isAbsolute, join, relative, resolve } from 'node:path'
@@ -67,6 +67,9 @@ export function registerIpc(deps: IpcDeps): void {
 
   // Files the user picked in a dialog this session; other paths from the window must be in the workspace.
   const pickedFiles = new Set<string>()
+  // Folders the user picked on the create-workspace page; the window may only create workspaces there.
+  const pickedFolders = new Set<string>()
+  const defaultLocation = () => join(app.getPath('documents'), 'PM Local')
   const dataFilePath = (path: string) => {
     const abs = resolve(ws(), path)
     const rel = relative(ws(), abs)
@@ -110,6 +113,36 @@ export function registerIpc(deps: IpcDeps): void {
       use(last)
       return store.openWorkspace(last)
     },
+    defaultWorkspaceLocation: async () => defaultLocation(),
+    async pickFolder(purpose) {
+      const res = await dialog.showOpenDialog(deps.win, {
+        title: purpose === 'location' ? 'Choose where to create the workspace' : 'Choose your project folder',
+        properties: ['openDirectory', 'createDirectory'],
+      })
+      const dir = res.filePaths[0]
+      if (res.canceled || !dir) return null
+      pickedFolders.add(resolve(dir))
+      return dir
+    },
+    async createWorkspace(input) {
+      const name = input.name.trim()
+      let dir: string
+      if (input.setup === 'blank') {
+        const location = resolve(input.location)
+        if (location !== defaultLocation() && !pickedFolders.has(location)) throw new WorkspaceError('Choose the location with the folder picker')
+        dir = await store.createWorkspaceIn(location, name)
+      } else {
+        dir = resolve(input.folder)
+        if (!pickedFolders.has(dir)) throw new WorkspaceError('Choose the folder with the folder picker')
+        // An existing workspace is opened as it is; any other folder becomes one (its files are untouched).
+        if (!(await store.isWorkspace(dir))) await store.initWorkspace(dir, name)
+      }
+      use(dir)
+      await deps.settings.rememberWorkspace(dir)
+      return store.openWorkspace(dir)
+    },
+    listWorkspaces: () => Promise.all(deps.settings.get().recentWorkspaces.map(async (root) => ({ root, name: await store.workspaceName(root) }))),
+    forgetWorkspace: (dir) => deps.settings.forgetWorkspace(dir),
     async openRecentWorkspace(dir) {
       // Only folders the user already opened through the picker.
       if (!deps.settings.get().recentWorkspaces.includes(dir)) throw new WorkspaceError('Not a recent workspace')

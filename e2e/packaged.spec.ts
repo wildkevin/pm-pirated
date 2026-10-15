@@ -29,7 +29,7 @@ test('packaged app: request engine, mock server and capture proxy processes all 
     dialog.showOpenDialog = (async () => ({ canceled: false, filePaths: [d] })) as typeof dialog.showOpenDialog
   }, dir)
   const page = await app.firstWindow()
-  await page.getByRole('button', { name: 'Open workspace' }).first().click()
+  await page.getByRole('button', { name: 'Open an existing workspace folder…' }).click()
 
   // Engine process (send).
   await page.getByRole('button', { name: 'New request tab' }).click()

@@ -69,6 +69,10 @@ export class AppSettings {
     await writeFileAtomic(this.file, stableStringify(onDisk))
   }
 
+  async forgetWorkspace(dir: string): Promise<void> {
+    await this.save({ ...this.data, recentWorkspaces: this.data.recentWorkspaces.filter((d) => d !== dir) })
+  }
+
   async rememberWorkspace(dir: string): Promise<void> {
     const recent = [dir, ...this.data.recentWorkspaces.filter((d) => d !== dir)].slice(0, 10)
     await this.save({ ...this.data, recentWorkspaces: recent })
