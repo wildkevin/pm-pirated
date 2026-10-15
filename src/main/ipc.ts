@@ -47,8 +47,8 @@ export function registerIpc(deps: { win: BrowserWindow; settings: AppSettings; e
       return { workspace: await reopen(), id }
     },
     async renameNode(id, name) {
-      await store.renameNode(ws(), id, name)
-      return reopen()
+      const newId = await store.renameNode(ws(), id, name)
+      return { workspace: await reopen(), id: newId }
     },
     async deleteNode(id) {
       await store.deleteNode(ws(), id)

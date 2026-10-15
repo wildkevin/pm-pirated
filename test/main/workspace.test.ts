@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, readFile, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { beforeEach, describe, expect, it } from 'vitest'
@@ -82,17 +82,26 @@ describe('tree editing', () => {
     expect(text.indexOf('"name"')).toBeLessThan(text.indexOf('"request"'))
   })
 
-  it('renames without moving files', async () => {
+  it('renames the display name and the file/folder, keeping order', async () => {
     const col = await createCollection(root, 'C')
     const folder = await createFolder(root, col, 'F')
     const req = await createRequest(root, folder, 'R')
-    await renameNode(root, col, 'C2')
-    await renameNode(root, folder, 'F2')
-    await renameNode(root, req, 'R2')
+    await createRequest(root, col, 'Last')
+    expect(await renameNode(root, req, 'R2')).toBe('collections/C/F/R2.request.json')
+    expect(await renameNode(root, folder, 'F/2')).toBe('collections/C/F_2')
+    expect(await renameNode(root, col, 'C2')).toBe('collections/C2')
     const [c] = (await openWorkspace(root)).collections
     expect(c.name).toBe('C2')
-    expect(c.children![0].name).toBe('F2')
-    expect(c.children![0].children![0]).toMatchObject({ id: req, name: 'R2' })
+    expect(names(c.children)).toEqual(['F/2', 'Last'])
+    expect(c.children![0].children![0]).toMatchObject({ id: 'collections/C2/F_2/R2.request.json', name: 'R2' })
+  })
+
+  it('rename keeps the file when the name maps to the same file, and avoids collisions', async () => {
+    const col = await createCollection(root, 'C')
+    const a = await createRequest(root, col, 'A')
+    await createRequest(root, col, 'B')
+    expect(await renameNode(root, a, 'A')).toBe(a)
+    expect(await renameNode(root, a, 'b')).toBe('collections/C/b (2).request.json')
   })
 
   it('deletes nodes and their order entries', async () => {
@@ -165,6 +174,17 @@ describe('resolveInside', () => {
     expect(resolveInside(root, 'collections/A/b.request.json')).toBe(
       join(root, 'collections', 'A', 'b.request.json'),
     )
+  })
+})
+
+describe('symlinks', () => {
+  it('refuses to write through a symlinked folder and hides it from the tree', async () => {
+    await initWorkspace(root)
+    const outside = await mkdtemp(join(tmpdir(), 'pml-outside-'))
+    await symlink(outside, join(root, 'collections', 'Evil'), 'junction')
+    await expect(createRequest(root, 'collections/Evil', 'x')).rejects.toBeInstanceOf(WorkspaceError)
+    expect(await readdir(outside)).toEqual([])
+    expect((await openWorkspace(root)).collections).toEqual([])
   })
 })
 

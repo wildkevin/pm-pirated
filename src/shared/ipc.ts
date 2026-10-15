@@ -15,7 +15,8 @@ export interface Api {
   createCollection(name: string): Promise<Created>
   createFolder(parentId: string, name: string): Promise<Created>
   createRequest(parentId: string, name: string): Promise<Created>
-  renameNode(id: string, name: string): Promise<WorkspaceInfo>
+  /** Returns the node's new id (its file/folder is renamed to match). */
+  renameNode(id: string, name: string): Promise<Created>
   deleteNode(id: string): Promise<WorkspaceInfo>
   readRequest(id: string): Promise<PmItem>
   saveRequest(id: string, item: PmItem): Promise<WorkspaceInfo>

@@ -51,7 +51,7 @@ export function startSend(item: PmItem, opts: { timeoutMs: number }): SendHandle
   }
 
   const prepared: PmItem = { ...item, request: { ...item.request, url: ensureProtocol(item.request.url) } }
-  const collection = new Collection({ item: [prepared] } as ConstructorParameters<typeof Collection>[0])
+  const collection = new Collection({ item: [prepared] })
   new runtime.Runner().run(collection, { timeout: { request: opts.timeoutMs } }, (err, r) => {
     if (err) return finish({ ok: false, error: err.message })
     if (cancelled) return finish(CANCELLED)

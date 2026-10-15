@@ -1,4 +1,5 @@
-import { mkdir, readdir, readFile, rm, stat } from 'node:fs/promises'
+import { lstatSync } from 'node:fs'
+import { mkdir, readdir, readFile, rename, rm, stat } from 'node:fs/promises'
 import { basename, dirname, join, relative, resolve, sep } from 'node:path'
 import { sanitizeName, uniqueName } from '../../shared/format/names'
 import { stableStringify } from '../../shared/format/stableJson'
@@ -12,7 +13,7 @@ const REQ_EXT = '.request.json'
 interface DirMeta {
   order?: string[]
   name?: string
-  info?: { name?: string }
+  info?: { name?: string; schema?: string }
   [extra: string]: unknown
 }
 
@@ -37,10 +38,24 @@ async function readMeta(file: string): Promise<DirMeta> {
   }
 }
 
-/** Maps a renderer-supplied id to an absolute path, refusing anything outside collections/. */
+/**
+ * Maps a renderer-supplied id to an absolute path, refusing anything outside collections/ and
+ * any symlink/junction on the way (a cloned workspace could otherwise point writes elsewhere).
+ */
 export function resolveInside(root: string, id: string): string {
+  const base = collectionsDir(root)
   const abs = resolve(root, id)
-  if (!abs.startsWith(collectionsDir(root) + sep)) throw new WorkspaceError(`Path outside workspace: ${id}`)
+  if (!abs.startsWith(base + sep)) throw new WorkspaceError(`Path outside workspace: ${id}`)
+  let p = base
+  for (const part of relative(base, abs).split(sep)) {
+    p = join(p, part)
+    try {
+      if (lstatSync(p).isSymbolicLink()) throw new WorkspaceError(`Symbolic links are not allowed in a workspace: ${id}`)
+    } catch (e) {
+      if (e instanceof WorkspaceError) throw e
+      break // the rest of the path does not exist yet
+    }
+  }
   return abs
 }
 
@@ -174,18 +189,32 @@ export async function saveRequest(root: string, id: string, item: PmItem): Promi
   await writeFileAtomic(requestPath(root, id), stableStringify(item))
 }
 
-export async function renameNode(root: string, id: string, name: string): Promise<void> {
+export async function renameNode(root: string, id: string, name: string): Promise<string> {
   const abs = resolveInside(root, id)
   if (abs.endsWith(REQ_EXT)) {
     const item = await readRequest(root, id)
     await saveRequest(root, id, { ...item, name })
-    return
+  } else {
+    const file = metaPath(root, abs)
+    const meta = await readMeta(file)
+    if (isCollectionDir(root, abs)) meta.info = { schema: COLLECTION_SCHEMA, ...meta.info, name }
+    else meta.name = name
+    await writeFileAtomic(file, stableStringify(meta))
   }
-  const file = metaPath(root, abs)
-  const meta = await readMeta(file)
-  if (isCollectionDir(root, abs)) meta.info = { schema: COLLECTION_SCHEMA, ...meta.info, name }
-  else meta.name = name
-  await writeFileAtomic(file, stableStringify(meta))
+  return moveToName(root, abs, name)
+}
+
+/** Renames the file/folder to match the display name so the folder stays readable in git. */
+async function moveToName(root: string, abs: string, name: string): Promise<string> {
+  const ext = abs.endsWith(REQ_EXT) ? REQ_EXT : ''
+  const oldEntry = basename(abs)
+  const parent = dirname(abs)
+  const taken = (await entryNames(parent)).filter((n) => n !== oldEntry)
+  const newEntry = uniqueName(sanitizeName(name), taken, ext)
+  if (newEntry === oldEntry) return toId(root, abs)
+  await rename(abs, join(parent, newEntry))
+  await updateOrder(root, parent, (o) => o.map((n) => (n === oldEntry ? newEntry : n)))
+  return toId(root, join(parent, newEntry))
 }
 
 export async function deleteNode(root: string, id: string): Promise<void> {

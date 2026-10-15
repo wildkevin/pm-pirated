@@ -10,3 +10,9 @@ declare module 'postman-runtime' {
   }
   export default runtime
 }
+
+declare module 'postman-collection' {
+  export class Collection {
+    constructor(definition: unknown)
+  }
+}
