@@ -88,6 +88,29 @@ test('dirty tabs offer save, discard and cancel without losing a draft', async (
   } finally { await app.close() }
 })
 
+test('close shortcut preserves editor input that has not reached React yet', async () => {
+  const { app, page } = await fixture()
+  try {
+    await page.getByRole('button', { name: 'New request tab', exact: true }).click()
+    const url = page.getByLabel('Request URL')
+    await url.focus()
+    // Put a DOM edit and the shortcut in the same task, before MutationObserver delivery.
+    // CodeMirror flushes this pending input in its own keydown listener.
+    await url.evaluate(element => {
+      element.querySelector('.cm-line')!.textContent = 'https://example.test/pending-input'
+      element.dispatchEvent(new KeyboardEvent('keydown', {
+        key: 'w', code: 'KeyW', keyCode: 87, bubbles: true, cancelable: true,
+        metaKey: /Mac/.test(navigator.platform), ctrlKey: !/Mac/.test(navigator.platform),
+      }))
+    })
+    const confirm = page.getByRole('dialog', { name: 'Save changes?', exact: true })
+    await expect(confirm).toBeVisible()
+    await confirm.getByRole('button', { name: 'Cancel', exact: true }).click()
+    await expect(url).toHaveText('https://example.test/pending-input')
+    await expect(page.locator('.tabs .tab-dirty')).toHaveCount(1)
+  } finally { await app.close() }
+})
+
 test('workspace stays in loading state until saved tabs finish restoring', async () => {
   const { app, page } = await fixture()
   try {

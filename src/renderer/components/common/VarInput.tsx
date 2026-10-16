@@ -14,6 +14,7 @@ import {
 import { useContext, useEffect, useRef } from 'react'
 import type { ResolvedVariable } from '../../../shared/ipc'
 import { isDynamicVariable } from '../../lib/misc'
+import { appShortcutHandler } from '../../lib/shortcut-events'
 
 export type Resolve = (name: string) => ResolvedVariable | undefined
 
@@ -115,6 +116,7 @@ export function VarInput({ value, onChange, onEnter, onPasteCurl, resolve, place
       state: EditorState.create({
         doc: value,
         extensions: [
+          appShortcutHandler,
           theme,
           completion.current.of([]),
           vars.current.of([highlighter(resolve), tooltip(resolve)]),

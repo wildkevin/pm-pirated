@@ -10,6 +10,7 @@ import { Compartment, EditorState, type Extension } from '@codemirror/state'
 import { EditorView, placeholder as placeholderExt } from '@codemirror/view'
 import { basicSetup } from 'codemirror'
 import { useEffect, useRef } from 'react'
+import { appShortcutHandler } from '../../lib/shortcut-events'
 
 export type EditorLanguage = 'json' | 'javascript' | 'xml' | 'html' | 'text' | 'graphql'
 
@@ -70,6 +71,7 @@ export function CodeEditor({ value, onChange, language, readOnly, placeholder, c
       state: EditorState.create({
         doc: value,
         extensions: [
+          appShortcutHandler,
           basicSetup,
           preferences.current.of([]),
           theme,

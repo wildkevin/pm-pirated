@@ -13,6 +13,7 @@ import { DEFAULT_SETTINGS, type AppSettingsData } from '../shared/settings'
 import { getAttr, setAttr } from './lib/auth'
 import { cleanError, viewBody } from './lib/body'
 import { splitVariables } from './lib/misc'
+import { appShortcutEvents } from './lib/shortcut-events'
 import { RightPanel, type RightView } from './components/RightPanel'
 import { ContainerEditor } from './components/ContainerEditor'
 import { Console, type ConsoleEntry } from './components/Console'
@@ -427,16 +428,26 @@ export function App() {
 
   // One binding map drives both editable Settings and command dispatch. Modifiers match exactly.
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
+    const reserved = new WeakMap<KeyboardEvent, NonNullable<ReturnType<typeof findShortcut>>>()
+    const reserveKey = (e: KeyboardEvent) => {
       if (e.defaultPrevented || e.isComposing || (e.target as Element)?.closest?.('[data-shortcut-recorder]')) return
-      if (e.key === 'Escape' && overlayPanel) { setOverlayPanel(null); return }
-      if (e.key === 'Escape' && page && stateRef.current.workspace && !modal) { setPage(null); return }
       if (!prefs.ui.shortcuts) return
       const command = findShortcut(prefs.shortcutBindings, e, /Mac/.test(navigator.platform))
       if (!command) return
       if (modal || closing.length) {
         if (!['zoomIn', 'zoomOut', 'zoomReset'].includes(command)) return
       }
+      if (!stateRef.current.workspace && !['settings', 'shortcutHelp', 'zoomIn', 'zoomOut', 'zoomReset', 'search'].includes(command)) return
+      reserved.set(e, command)
+      appShortcutEvents.add(e)
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.isComposing || (e.target as Element)?.closest?.('[data-shortcut-recorder]')) return
+      const command = reserved.get(e)
+      if (e.defaultPrevented && !command) return
+      if (e.key === 'Escape' && overlayPanel) { setOverlayPanel(null); return }
+      if (e.key === 'Escape' && page && stateRef.current.workspace && !modal) { setPage(null); return }
+      if (!command) return
       const workspace = stateRef.current.workspace
       const tab = activeTab(stateRef.current)
       const focus = (selector: string) => requestAnimationFrame(() => document.querySelector<HTMLElement>(selector)?.focus())
@@ -445,7 +456,6 @@ export function App() {
         setSettings(next)
         void window.api.saveSettings(next).catch(fail)
       }
-      if (!workspace && !['settings', 'shortcutHelp', 'zoomIn', 'zoomOut', 'zoomReset', 'search'].includes(command)) return
       switch (command) {
         case 'settings': setModal({ kind: 'settings' }); break
         case 'shortcutHelp': setModal({ kind: 'settings', section: 'shortcuts' }); break
@@ -503,9 +513,14 @@ export function App() {
       }
       e.preventDefault()
     }
-    // Capture prevents editor search/save bindings from stealing user-assigned app commands.
-    window.addEventListener('keydown', onKey, true)
-    return () => window.removeEventListener('keydown', onKey, true)
+    // Reserve app bindings before editor keymaps, but execute after CodeMirror's keydown
+    // listener flushes pending DOM input. Closing/saving in capture can lose the last edit.
+    window.addEventListener('keydown', reserveKey, true)
+    window.addEventListener('keydown', onKey)
+    return () => {
+      window.removeEventListener('keydown', reserveKey, true)
+      window.removeEventListener('keydown', onKey)
+    }
   })
 
   // --- sidebar actions ---
@@ -745,8 +760,8 @@ export function App() {
               breadcrumb={path.slice(0, -1).map((n) => n.name)}
               resolve={resolve}
               settings={settings}
-              onPatch={(patch) => dispatch({ type: 'edit', key: active.key, patch })}
-              onItemPatch={(patch) => dispatch({ type: 'editItem', key: active.key, patch })}
+              onPatch={(patch) => act({ type: 'edit', key: active.key, patch })}
+              onItemPatch={(patch) => act({ type: 'editItem', key: active.key, patch })}
               onSend={(download) => send(active, download)}
               onCancel={() => cancel(active)}
               onSave={() => void save(active)}
@@ -784,8 +799,8 @@ export function App() {
           key={active.key}
           doc={doc}
           isCollection={active.id!.split('/').length === 2}
-          onPatch={(patch) => dispatch({ type: 'patchContainer', key: active.key, patch })}
-          onVariables={(variables) => dispatch({ type: 'setContainerVariables', key: active.key, variables })}
+          onPatch={(patch) => act({ type: 'patchContainer', key: active.key, patch })}
+          onVariables={(variables) => act({ type: 'setContainerVariables', key: active.key, variables })}
           onSave={() => void save(active)}
           onRun={() => dispatch({ type: 'openRunner', target: active.id! })}
           onGetOAuth2Token={getOAuth2Token((auth) => dispatch({ type: 'patchContainer', key: active.key, patch: { auth } }))}
@@ -806,7 +821,7 @@ export function App() {
             : 'Current values stay on this computer; initial values are saved in the workspace folder (secret values never are).'}
         </p>
         <div className="subtab-panel">
-          <VariablesEditor rows={doc.rows} onChange={(rows) => dispatch({ type: 'setRows', key: active.key, rows })} />
+          <VariablesEditor rows={doc.rows} onChange={(rows) => act({ type: 'setRows', key: active.key, rows })} />
         </div>
       </div>
     )
