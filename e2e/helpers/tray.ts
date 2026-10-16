@@ -11,6 +11,7 @@ export async function verifyWindowsTray(exe?: string) {
   const env = { ...process.env, PM_LOCAL_USER_DATA: join(root, 'appdata') }
   const args = exe ? [] : ['.']
   const app = await electron.launch({ ...(exe ? { executablePath: exe } : {}), args, env })
+  const child = app.process()
   try {
     const page = await app.firstWindow()
     await app.evaluate(({ dialog }, dir) => {
@@ -22,7 +23,7 @@ export async function verifyWindowsTray(exe?: string) {
     await expect(page.locator('.tabs .tab-dirty')).toHaveCount(1)
     await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].close())
     await expect.poll(() => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().map(win => win.isVisible()))).toEqual([false])
-    expect(app.process().exitCode).toBeNull()
+    expect(child.exitCode).toBeNull()
     // Exercise the actual single-instance path by launching the executable again.
     const executable = await app.evaluate(() => process.execPath)
     await promisify(execFile)(executable, args, { env, timeout: 15_000 })
@@ -31,5 +32,5 @@ export async function verifyWindowsTray(exe?: string) {
     // Quit while hidden must bypass close-to-tray rather than keeping a headless process alive.
     await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].close())
   } finally { await app.close() }
-  expect(app.process().exitCode).toBe(0)
+  expect(child.exitCode).toBe(0)
 }
