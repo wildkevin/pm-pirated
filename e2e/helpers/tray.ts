@@ -24,7 +24,8 @@ export async function verifyWindowsTray(exe?: string) {
     await expect.poll(() => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().map(win => win.isVisible()))).toEqual([false])
     expect(app.process().exitCode).toBeNull()
     // Exercise the actual single-instance path by launching the executable again.
-    await promisify(execFile)(app.process().spawnfile, args, { env, timeout: 15_000 })
+    const executable = await app.evaluate(() => process.execPath)
+    await promisify(execFile)(executable, args, { env, timeout: 15_000 })
     await expect.poll(() => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().map(win => win.isVisible()))).toEqual([true])
     await expect(page.getByLabel('Request URL')).toHaveText('https://example.test/tray-draft')
     // Quit while hidden must bypass close-to-tray rather than keeping a headless process alive.
