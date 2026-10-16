@@ -73,7 +73,7 @@ export function nextZoom(level: number, key: string): number | null {
   return null
 }
 
-export function createMainWindow(onZoom: (level: number) => void = () => undefined, icon?: string): BrowserWindow {
+export function createMainWindow(onZoom: (level: number) => void = () => undefined, icon?: string, hideOnClose: () => boolean = () => false): BrowserWindow {
   const win = new BrowserWindow({ ...mainWindowOptions(join(__dirname, '../preload/index.js')), icon })
   const loc = rendererLocation()
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
@@ -88,6 +88,11 @@ export function createMainWindow(onZoom: (level: number) => void = () => undefin
     if (!win.isDestroyed()) win.close()
   }
   win.on('close', (e) => {
+    if (hideOnClose()) {
+      e.preventDefault()
+      win.hide()
+      return
+    }
     if (closing) return
     e.preventDefault()
     ipcMain.once(CLOSE_READY, (ev) => ev.sender === win.webContents && reallyClose())

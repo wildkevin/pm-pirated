@@ -1,3 +1,4 @@
+import { verifyWindowsTray } from './helpers/tray'
 // Smoke test of the packaged app (portable exe / unpacked folder). Run with PM_LOCAL_EXE=<path to the executable>.
 import { _electron as electron, expect, test } from '@playwright/test'
 import { mkdtemp } from 'node:fs/promises'
@@ -61,3 +62,5 @@ test('packaged app: request engine, mock server and capture proxy processes all 
   await app.close()
   server.close()
 })
+
+test('packaged app: close-to-tray, reopen and explicit exit', () => verifyWindowsTray(exe))

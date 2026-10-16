@@ -1,5 +1,5 @@
 /// <reference types="electron-vite/node" />
-import { app, Menu, safeStorage, session, utilityProcess } from 'electron'
+import { app, Menu, safeStorage, session, utilityProcess, type Tray } from 'electron'
 // Copied into out/ by electron-vite, so `npm start` shows our icon instead of Electron's.
 import icon from '../../build/icon.png?asset'
 import { join } from 'node:path'
@@ -17,6 +17,7 @@ import { systemProxyFor, writeCaBundle } from './netconfig'
 import { SecretStore } from './secrets'
 import { AppSettings } from './settings'
 import { allowRendererPermission, applicationMenuTemplate, createMainWindow, rendererLocation } from './window'
+import { createWindowsTray, restoreWindow } from './tray'
 
 app.setName('PM Local')
 
@@ -83,7 +84,11 @@ if (!app.requestSingleInstanceLock()) {
     }
     app.dock?.setIcon(icon)
     Menu.setApplicationMenu(Menu.buildFromTemplate(applicationMenuTemplate(process.platform, !!process.env.ELECTRON_RENDERER_URL, saveZoom)))
-    const win = createMainWindow(saveZoom, icon)
+    let quitting = false
+    let tray: Tray | undefined
+    const win = createMainWindow(saveZoom, icon, () => !!tray && !quitting)
+    tray = createWindowsTray(win, icon, () => app.quit())
+    app.on('quit', () => tray?.destroy())
     // Copy buttons are permitted only in our trusted main renderer.
     session.defaultSession.setPermissionRequestHandler((wc, permission, callback, details) => {
       callback(wc === win.webContents && allowRendererPermission(permission, wc.getURL(), details.requestingUrl, rendererLocation()))
@@ -134,10 +139,10 @@ if (!app.requestSingleInstanceLock()) {
       })
     })
     app.on('second-instance', () => {
-      if (win.isMinimized()) win.restore()
-      win.focus()
+      restoreWindow(win)
     })
     app.on('before-quit', () => {
+      quitting = true
       engine.dispose()
       mockClient.dispose()
       load.dispose()

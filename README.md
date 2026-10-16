@@ -16,6 +16,10 @@ Visual reference: [`docs/reference/README.md`](docs/reference/README.md)
 - `PM-Local-<version>-win-x64.zip` — unzip anywhere and run `PM Local.exe`; starts instantly. Use this if
   your company blocks programs that run from the temp folder.
 
+On Windows, closing the window keeps PM Local running in the system tray. Click its tray icon,
+choose **Show PM Local**, or open the exe again to restore your window and drafts. Choose **Exit**
+from the tray menu to quit and stop background requests, mocks, and capture.
+
 Windows SmartScreen may warn because the app is not code-signed: *More info* → *Run anyway*.
 
 **From source:** requires Node.js 24.
